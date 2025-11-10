@@ -212,7 +212,7 @@ export default function PracticePage() {
 
         {!loading && (
           <div className="mx-auto">
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 items-stretch">
               {/* Dynamic Course MCQ Cards */}
               {courses.map((course, index) => {
                 const imageKey = `${course.id}-${course.image}`;
@@ -220,7 +220,7 @@ export default function PracticePage() {
                 const displaySrc = hasError ? '/LmsImg.jpg' : course.image;
                 const fallbackKey = `${course.id}-/LmsImg.jpg`;
                 const isLoaded = loadedImages.has(imageKey) || (hasError && loadedImages.has(fallbackKey));
-                const isPriority = index < 8; // Load first 8 images with priority
+                const isPriority = index < 2; // Load only first 2 images with priority
                 const seoAttributes = getImageSEOAttributes(course.title, 'practice');
                 const fallbackSEO = {
                   alt: `VAWE Institute - SkillWins LMS Practice Platform | Best Software Training in Vijayawada`,
@@ -231,17 +231,13 @@ export default function PracticePage() {
                 return (
                   <div
                     key={course.id}
-                    className="group bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-sm border border-gray-700/50 rounded-xl sm:rounded-2xl shadow-lg sm:shadow-xl overflow-hidden hover:shadow-2xl hover:shadow-[#26ebe5]/30 hover:border-[#26ebe5]/50 hover:-translate-y-1 sm:hover:-translate-y-2 transition-all duration-300 cursor-pointer"
+                    className="group bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-sm border border-gray-700/50 rounded-xl sm:rounded-2xl shadow-md overflow-hidden hover:shadow-[#26ebe5]/30 hover:border-[#26ebe5]/50 hover:-translate-y-1 sm:hover:-translate-y-2 transition-all duration-300 cursor-pointer flex flex-col h-full"
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="relative overflow-hidden bg-gray-800/50">
+                    <div className="relative overflow-hidden bg-white flex items-center justify-center">
                       {/* Loading Skeleton */}
                       {!isLoaded && (
-                        <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-gray-700/50 via-gray-600/50 to-gray-700/50">
-                          <div className="w-full h-full flex items-center justify-center">
-                            <div className="w-12 h-12 border-4 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div>
-                          </div>
-                        </div>
+                        <div className="absolute inset-0 bg-gray-700/30"><div className="w-full h-full flex items-center justify-center"><div className="w-12 h-12 border-3 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div></div></div>
                       )}
                       
                       <Image
@@ -255,7 +251,7 @@ export default function PracticePage() {
                         quality={75}
                         priority={isPriority && !hasError}
                         loading={isPriority && !hasError ? undefined : "lazy"}
-                        className={`h-32 sm:h-40 md:h-48 w-full object-cover group-hover:scale-110 transition-all duration-500 ${
+                        className={`h-32 sm:h-40 md:h-48 w-full object-contain object-center group-hover:scale-110 transition-all duration-500 ${
                           isLoaded ? 'opacity-100' : 'opacity-0'
                         }`}
                         onLoad={() => {
@@ -268,12 +264,11 @@ export default function PracticePage() {
                           }
                         }}
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
                       <div className="absolute top-2 right-2 sm:top-3 sm:right-3 bg-[#26ebe5]/90 text-white text-xs font-bold px-2 py-1 sm:px-3 sm:py-1 rounded-full backdrop-blur-sm">
                         MCQ
                       </div>
                     </div>
-                  <div className="p-4 sm:p-5 md:p-6 space-y-2 sm:space-y-3">
+                  <div className="p-4 sm:p-5 md:p-6 space-y-2 sm:space-y-3 flex flex-col flex-1">
                     <h2 className="text-black sm:text-lg md:text-xl font-bold mb-1 sm:mb-2 group-hover:text-[#26ebe5] transition-colors duration-300 line-clamp-2 leading-tight">
                       {course.title}
                     </h2>
@@ -282,7 +277,7 @@ export default function PracticePage() {
                     </p>
                     <button
                       onClick={() => router.push(`/practice/${course.slug}`)}
-                      className="w-full mt-3 sm:mt-4 px-3 py-2 sm:px-4 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] rounded-lg shadow-lg hover:shadow-[#26ebe5]/50 text-white font-semibold text-xs sm:text-sm md:text-base transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group"
+                      className="w-full mt-auto px-3 py-2 sm:px-4 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] rounded-lg shadow-lg hover:shadow-[#26ebe5]/50 text-white font-semibold text-xs sm:text-sm md:text-base transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group"
                     >
                       Start Practice
                       <span className="group-hover:translate-x-1 transition-transform duration-300">→</span>
@@ -300,17 +295,13 @@ export default function PracticePage() {
                 
                 return (
                   <div
-                    className="group bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-sm border border-gray-700/50 rounded-xl sm:rounded-2xl shadow-lg sm:shadow-xl overflow-hidden hover:shadow-2xl hover:shadow-cyan-500/30 hover:border-cyan-400/50 hover:-translate-y-1 sm:hover:-translate-y-2 transition-all duration-300 cursor-pointer"
+                    className="group bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-sm border border-gray-700/50 rounded-xl sm:rounded-2xl shadow-md overflow-hidden hover:shadow-cyan-500/30 hover:border-cyan-400/50 hover:-translate-y-1 sm:hover:-translate-y-2 transition-all duration-300 cursor-pointer flex flex-col h-full"
                     style={{ animationDelay: `${courses.length * 50}ms` }}
                   >
-                    <div className="relative overflow-hidden bg-gray-800/50">
+                    <div className="relative overflow-hidden bg-white flex items-center justify-center">
                       {/* Loading Skeleton */}
                       {!codingIsLoaded && (
-                        <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-gray-700/50 via-gray-600/50 to-gray-700/50">
-                          <div className="w-full h-full flex items-center justify-center">
-                            <div className="w-12 h-12 border-4 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div>
-                          </div>
-                        </div>
+                        <div className="absolute inset-0 bg-gray-700/30"><div className="w-full h-full flex items-center justify-center"><div className="w-12 h-12 border-3 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div></div></div>
                       )}
                       
                       <Image
@@ -321,22 +312,21 @@ export default function PracticePage() {
                         height={200}
                         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         quality={75}
-                        priority={courses.length < 8}
-                        loading={courses.length < 8 ? undefined : "lazy"}
-                        className={`h-32 sm:h-40 md:h-48 w-full object-cover group-hover:scale-110 transition-all duration-500 ${
+                        priority={false}
+                        loading="lazy"
+                        className={`h-32 sm:h-40 md:h-48 w-full object-contain object-center group-hover:scale-110 transition-all duration-500 ${
                           codingIsLoaded ? 'opacity-100' : 'opacity-0'
                         }`}
                         onLoad={() => {
                           setLoadedImages(prev => new Set([...prev, codingImageKey]));
                         }}
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
                       <div className="absolute top-2 right-2 sm:top-3 sm:right-3 bg-gradient-to-r from-[#26ebe5] to-[#00448a] text-white text-xs font-bold px-2 py-1 sm:px-3 sm:py-1 rounded-full backdrop-blur-sm animate-pulse">
                         CODING
                       </div>
                     </div>
-                <div className="p-4 sm:p-5 md:p-6 space-y-2 sm:space-y-3">
-                  <h2 className="text-base sm:text-lg md:text-xl font-bold mb-1 sm:mb-2 group-hover:text-[#26ebe5] transition-colors duration-300 leading-tight">
+                <div className="p-4 sm:p-5 md:p-6 space-y-2 sm:space-y-3 flex flex-col flex-1">
+                  <h2 className="text-black sm:text-lg md:text-xl font-bold mb-1 sm:mb-2 group-hover:text-[#26ebe5] transition-colors duration-300 leading-tight">
                     Coding Questions
                   </h2>
                   <p className="text-gray-400 text-xs sm:text-sm md:text-base leading-relaxed">
@@ -344,7 +334,7 @@ export default function PracticePage() {
                   </p>
                   <button
                     onClick={() => router.push("/practice/coding")}
-                    className="w-full mt-3 sm:mt-4 px-3 py-2 sm:px-4 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] rounded-lg shadow-lg hover:shadow-[#26ebe5]/50 text-white font-semibold text-xs sm:text-sm md:text-base transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group"
+                    className="w-full mt-auto px-3 py-2 sm:px-4 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] rounded-lg shadow-lg hover:shadow-[#26ebe5]/50 text-white font-semibold text-xs sm:text-sm md:text-base transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group"
                   >
                     Start Coding
                     <span className="group-hover:translate-x-1 transition-transform duration-300">→</span>

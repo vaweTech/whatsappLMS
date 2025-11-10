@@ -818,7 +818,7 @@ export default function AdminPage() {
     <div className="p-8 bg-gray-100 min-h-screen">
       <button
         onClick={() => router.back()}
-        className="mb-4 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+        className="mb-4 bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
       >
         ⬅ Back
       </button>
@@ -865,7 +865,7 @@ export default function AdminPage() {
             </div>
           </div>
           
-          <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded col-span-2">{newCourse.id ? "Update Course" : "Add Course"}</button>
+          <button type="submit" className="bg-blue-400 hover:bg-blue-500 text-white px-4 py-2 rounded col-span-2">{newCourse.id ? "Update Course" : "Add Course"}</button>
         </form>
       </div>
 
@@ -881,9 +881,9 @@ export default function AdminPage() {
                 <p className="text-xs text-gray-500">Code: {course.courseCode}</p>
               </div>
               <div className="flex gap-2">
-                <button className="bg-yellow-500 text-white px-3 py-1 rounded" onClick={() => setNewCourse(course)}>Edit</button>
-                <button className="bg-red-500 text-white px-3 py-1 rounded" onClick={() => handleDeleteCourse(course.id)}>Delete</button>
-                <button className="bg-gray-500 text-white px-3 py-1 rounded" onClick={() => setSelectedCourseId(selectedCourseId === course.id ? null : course.id)}>{selectedCourseId === course.id ? "Hide" : "View"}</button>
+                <button className="bg-yellow-400 hover:bg-yellow-500 text-white px-3 py-1 rounded" onClick={() => setNewCourse(course)}>Edit</button>
+                <button className="bg-red-400 hover:bg-red-500 text-white px-3 py-1 rounded" onClick={() => handleDeleteCourse(course.id)}>Delete</button>
+                <button className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded" onClick={() => setSelectedCourseId(selectedCourseId === course.id ? null : course.id)}>{selectedCourseId === course.id ? "Hide" : "View"}</button>
               </div>
             </div>
 
@@ -896,7 +896,7 @@ export default function AdminPage() {
                   {course.chapters.length > 0 && (
                     <button 
                       onClick={() => reorderChapters(course.id)}
-                      className="bg-blue-500 text-white px-3 py-1 rounded text-sm"
+                      className="bg-blue-400 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm"
                       title="Reorder chapters sequentially"
                     >
                       🔄 Reorder
@@ -992,8 +992,8 @@ export default function AdminPage() {
                          <input className="border p-2 rounded" placeholder="PDF Document (Google Drive Link)" value={newChapter.pdfDocument || ""} onChange={(e) => setNewChapter({ ...newChapter, pdfDocument: e.target.value })} />
                                          <textarea className="border p-2 rounded col-span-2" placeholder="topics" value={newChapter.topics || ""} onChange={(e) => setNewChapter({ ...newChapter, topics: e.target.value })} />
                           <div className="col-span-2 flex gap-2">
-                            <button type="submit" className="bg-green-500 text-white px-4 py-2 rounded flex-1">{newChapter.id ? "Update Chapter" : "Add Chapter"}</button>
-                            <button type="button" onClick={clearChapterForm} className="bg-gray-500 text-white px-4 py-2 rounded">Cancel</button>
+                            <button type="submit" className="bg-green-400 hover:bg-green-500 text-white px-4 py-2 rounded flex-1">{newChapter.id ? "Update Chapter" : "Add Chapter"}</button>
+                            <button type="button" onClick={clearChapterForm} className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">Cancel</button>
                           </div>
                         </form>
                       </div>
@@ -1061,7 +1061,7 @@ export default function AdminPage() {
                         {!showProgressTestForm && (
                           <button 
                             onClick={() => setShowProgressTestForm(true)}
-                            className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded w-full mb-4"
+                            className="bg-purple-400 hover:bg-purple-500 text-white px-4 py-2 rounded w-full mb-4"
                           >
                             ➕ Add New Progress Test
                           </button>
@@ -1144,7 +1144,7 @@ export default function AdminPage() {
                                   <button 
                                     type="button" 
                                     onClick={() => fetchPracticeQuestions(selectedCourseId)}
-                                    className="bg-blue-500 text-white px-3 py-1 rounded text-sm"
+                                    className="bg-blue-400 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm"
                                   >
                                     Select from Practice Bank
                                   </button>
@@ -1185,7 +1185,7 @@ export default function AdminPage() {
                                     <button 
                                       type="button" 
                                       onClick={addMCQQuestion}
-                                      className="bg-green-500 text-white px-3 py-1 rounded flex-1"
+                                      className="bg-green-400 hover:bg-green-500 text-white px-3 py-1 rounded flex-1"
                                     >
                                       {editingQuestionIndex !== null ? "Update MCQ Question" : "Add MCQ Question"}
                                     </button>
@@ -1193,7 +1193,7 @@ export default function AdminPage() {
                                       <button 
                                         type="button" 
                                         onClick={cancelEditQuestion}
-                                        className="bg-gray-500 text-white px-3 py-1 rounded"
+                                        className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded"
                                       >
                                         Cancel
                                       </button>
@@ -1211,7 +1211,7 @@ export default function AdminPage() {
                                   <button 
                                     type="button" 
                                     onClick={fetchCodingQuestions}
-                                    className="bg-blue-500 text-white px-3 py-1 rounded text-sm"
+                                    className="bg-blue-400 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm"
                                   >
                                     Select from Practice Bank
                                   </button>
@@ -1370,7 +1370,7 @@ Example:
                                     <button 
                                       type="button" 
                                       onClick={addCodingQuestion}
-                                      className="bg-green-500 text-white px-4 py-2 rounded flex-1"
+                                      className="bg-green-400 hover:bg-green-500 text-white px-4 py-2 rounded flex-1"
                                       disabled={!codingQuestion.question.trim() || !codingQuestion.description.trim()}
                                     >
                                       {editingQuestionIndex !== null ? "Update Coding Question" : "Add Coding Question"}
@@ -1379,7 +1379,7 @@ Example:
                                       <button 
                                         type="button" 
                                         onClick={cancelEditQuestion}
-                                        className="bg-gray-500 text-white px-4 py-2 rounded"
+                                        className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
                                       >
                                         Cancel
                                       </button>
@@ -1448,7 +1448,7 @@ Example:
                             )}
 
                             <div className="flex gap-2">
-                              <button type="submit" className="bg-purple-500 text-white px-4 py-2 rounded flex-1">
+                              <button type="submit" className="bg-purple-400 hover:bg-purple-500 text-white px-4 py-2 rounded flex-1">
                                 {newAssignment.id ? "Update Progress Test" : "Add Progress Test"}
                               </button>
                               <button 
@@ -1462,7 +1462,7 @@ Example:
                                   setEditingQuestionIndex(null);
                                   // Keep chapter context when canceling (it's still in the same chapter section)
                                 }}
-                                className="bg-gray-500 text-white px-4 py-2 rounded"
+                                className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
                               >
                                 Cancel
                               </button>
@@ -1485,7 +1485,7 @@ Example:
                       clearChapterForm();
                       setCurrentChapterContext(null); // Clear chapter context when adding new chapter
                     }}
-                    className="bg-green-500 text-white px-4 py-2 rounded w-full"
+                    className="bg-green-400 hover:bg-green-500 text-white px-4 py-2 rounded w-full"
                   >
                     ➕ Add New Chapter
                   </button>
@@ -1514,11 +1514,11 @@ Example:
                       <input className="border p-2 rounded" placeholder="PDF Document (Google Drive Link)" value={newChapter.pdfDocument || ""} onChange={(e) => setNewChapter({ ...newChapter, pdfDocument: e.target.value })} />
                       <textarea className="border p-2 rounded col-span-2" placeholder="topics" value={newChapter.topics || ""} onChange={(e) => setNewChapter({ ...newChapter, topics: e.target.value })} />
                       <div className="col-span-2 flex gap-2">
-                        <button type="submit" className="bg-green-500 text-white px-4 py-2 rounded flex-1">Add Chapter</button>
+                        <button type="submit" className="bg-green-400 hover:bg-green-500 text-white px-4 py-2 rounded flex-1">Add Chapter</button>
                         <button type="button" onClick={() => {
                           clearChapterForm();
                           setShowingChapterForm(null);
-                        }} className="bg-gray-500 text-white px-4 py-2 rounded">Cancel</button>
+                        }} className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">Cancel</button>
                       </div>
                     </form>
                   </div>
@@ -2208,16 +2208,16 @@ Example:
              </div>
             
             <div className="flex justify-end gap-2 mt-4">
-              <button 
+                <button 
                 onClick={() => setShowQuestionBank(false)}
-                className="bg-gray-500 text-white px-4 py-2 rounded"
+                  className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
               >
                 Cancel
               </button>
-              <button 
+                <button 
                 onClick={addSelectedPracticeQuestions}
                 disabled={selectedQuestions.length === 0}
-                className="bg-blue-500 text-white px-4 py-2 rounded disabled:bg-gray-300"
+                  className="bg-blue-400 hover:bg-blue-500 text-white px-4 py-2 rounded disabled:bg-gray-300"
               >
                 Add Selected ({selectedQuestions.length})
               </button>
@@ -2270,7 +2270,7 @@ Example:
             <div className="flex justify-end gap-2 mt-4">
               <button 
                 onClick={clearExcelData}
-                className="bg-gray-500 text-white px-4 py-2 rounded"
+                className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
               >
                 Cancel
               </button>
@@ -2283,7 +2283,7 @@ Example:
                   }
                 }}
                 disabled={!newCourse.id}
-                className="bg-green-500 text-white px-4 py-2 rounded disabled:bg-gray-300"
+                className="bg-green-400 hover:bg-green-500 text-white px-4 py-2 rounded disabled:bg-gray-300"
               >
                 Create {excelData.length} Chapters
               </button>

@@ -183,12 +183,10 @@ export default function CoursesPage() {
   return (
     <CheckAuth>
       <div className="min-h-screen bg-gradient-to-br from-[#fdc377]/30 to-[#00448a]/10 p-4 sm:p-6 lg:p-10">
-        <h1 className="text-3xl sm:text-4xl  md:text-5xl font-e                                                                                   xtrabold text-center mb-4 sm:mb-6 lg:mb-8 text-black tracking-wide drop-shadow-lg" 
-        style={{ fontFamily: '"montserrat"',
-          fontSize: '2.5rem',
-         }}
+        <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold text-center mb-6 sm:mb-8 lg:mb-10 text-[#00448a] tracking-wide drop-shadow-lg" 
+        style={{ fontFamily: '"montserrat"' }}
         >
-          Choose your <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#26ebe5] to-[#f56c53] drop-shadow-lg">Learning Path</span>
+          Choose your <span className="text-transparent bg-clip-text bg-black drop-shadow-lg">Learning Path</span>
         </h1>
         <p className="hidden md:block text-center text-black mb-6 sm:mb-8 px-4 max-w-3xl mx-auto">
           Explore our comprehensive programming courses designed to help you build a successful career in software development.
@@ -239,7 +237,7 @@ export default function CoursesPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 items-stretch">
             {filteredCourses.map((course, index) => {
               const imageSrc = getCourseImage(course.title);
               const imageKey = `${course.id}-${imageSrc}`;
@@ -247,7 +245,7 @@ export default function CoursesPage() {
               const displaySrc = hasError ? '/LmsImg.jpg' : imageSrc;
               const fallbackKey = `${course.id}-/LmsImg.jpg`;
               const isLoaded = loadedImages.has(imageKey) || (hasError && loadedImages.has(fallbackKey));
-              const isPriority = index < 10; // Load first 10 images with priority
+              const isPriority = index < 2; // Load only first 2 images with priority
               const seoAttributes = getImageSEOAttributes(course.title);
               const fallbackSEO = {
                 alt: `VAWE Institute - SkillWins LMS Platform | Best Software Training Institute in Vijayawada`,
@@ -259,18 +257,18 @@ export default function CoursesPage() {
                 <div
                   key={course.id}
                   onClick={() => router.push(`/courses/${createCourseUrl(course.title)}`)}
-                  className="relative group backdrop-blur-lg bg-white/10 rounded-xl sm:rounded-2xl lg:rounded-3xl overflow-hidden 
-                             border border-black/20 shadow-lg cursor-pointer 
+                  className="relative group backdrop-blur-sm bg-white/10 rounded-xl sm:rounded-2xl lg:rounded-3xl overflow-hidden 
+                             border border-black/20 shadow-md cursor-pointer 
                              hover:border-[#26ebe5] hover:shadow-[#26ebe5]/50 transition-all duration-300
-                             transform hover:scale-[1.02] active:scale-[0.98]"
+                             transform hover:scale-[1.02] active:scale-[0.98] flex flex-col h-full"
                 >
                   {/* Course Image - Optimized for mobile */}
-                  <div className="relative overflow-hidden rounded-t-xl sm:rounded-t-2xl lg:rounded-t-3xl aspect-video bg-gray-800/50">
+                  <div className="relative overflow-hidden rounded-t-xl sm:rounded-t-2xl lg:rounded-t-3xl aspect-video bg-white flex items-center justify-center">
                     {/* Loading Skeleton */}
                     {!isLoaded && (
-                      <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-gray-700/50 via-gray-600/50 to-gray-700/50">
+                      <div className="absolute inset-0 bg-gray-700/30">
                         <div className="w-full h-full flex items-center justify-center">
-                          <div className="w-16 h-16 border-4 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div>
+                          <div className="w-12 h-12 border-3 border-[#26ebe5]/30 border-t-[#26ebe5] rounded-full animate-spin"></div>
                         </div>
                       </div>
                     )}
@@ -286,7 +284,7 @@ export default function CoursesPage() {
                       quality={75}
                       priority={isPriority && !hasError}
                       loading={isPriority && !hasError ? undefined : "lazy"}
-                      className={`w-full h-full object-cover transition-all duration-300 group-hover:scale-110 ${
+                      className={`w-full h-full object-contain object-center transition-all duration-300 group-hover:scale-110 ${
                         isLoaded ? 'opacity-100' : 'opacity-0'
                       }`}
                       onLoad={() => {
@@ -299,13 +297,10 @@ export default function CoursesPage() {
                         }
                       }}
                     />
-                    
-                    {/* Gradient overlay for better text readability */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
                   </div>
 
                 {/* Content */}
-                <div className="p-3 sm:p-4 lg:p-6 text-black">
+                <div className="p-3 sm:p-4 lg:p-6 text-black flex flex-col flex-1">
                   <h3 className="text-base sm:text-lg lg:text-xl xl:text-2xl font-semibold mb-2 sm:mb-3 line-clamp-2 drop-shadow-md">
                     {course.title}
                   </h3>
@@ -317,7 +312,7 @@ export default function CoursesPage() {
                   <button className="w-full sm:w-auto px-4 py-2 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] text-white 
                                      rounded-lg text-xs sm:text-sm font-medium 
                                      shadow-md hover:shadow-[#26ebe5]/50 transition-all duration-300
-                                     flex items-center justify-center gap-2">
+                                     flex items-center justify-center gap-2 mt-auto">
                     <span>View Course</span>
                     <span className="group-hover:translate-x-1 transition-transform">→</span>
                   </button>

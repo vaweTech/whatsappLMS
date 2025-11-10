@@ -60,17 +60,7 @@ export default function AdminDashboard() {
 
       {/* Quick actions grid */}
       <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Link href="/Admin/interview">
-          <div className="group p-6 rounded-2xl cursor-pointer text-center bg-cyan-50 border border-slate-200 hover:border-cyan-300 transition-all shadow-sm hover:shadow-md">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-100 text-cyan-600 ring-1 ring-cyan-200 transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <h2 className="text-lg font-semibold mb-1 text-slate-800">Interview Exams</h2>
-            <p className="text-sm text-slate-600">Create MCQ and descriptive interview tests.</p>
-          </div>
-        </Link>
+       
         <Link href="Admin/mcqs">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-blue-50 border border-slate-200 hover:border-blue-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200 transition">
@@ -183,6 +173,17 @@ export default function AdminDashboard() {
             </div>
             <h2 className="text-lg font-semibold mb-1 text-slate-800">Manage Programs</h2>
             <p className="text-sm text-slate-600">Create programs and manage batches/classes.</p>
+          </div>
+        </Link>
+        <Link href="/Admin/interview">
+          <div className="group p-6 rounded-2xl cursor-pointer text-center bg-cyan-50 border border-slate-200 hover:border-cyan-300 transition-all shadow-sm hover:shadow-md">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-100 text-cyan-600 ring-1 ring-cyan-200 transition">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold mb-1 text-slate-800">Interview Exams</h2>
+            <p className="text-sm text-slate-600">Create MCQ and descriptive interview tests.</p>
           </div>
         </Link>
       </div>

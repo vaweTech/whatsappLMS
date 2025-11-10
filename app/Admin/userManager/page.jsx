@@ -613,7 +613,7 @@ export default function UserManagerPage() {
         {/* Back Button */}
         <button
           onClick={() => router.back()}
-          className="mb-4 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+          className="mb-4 bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded"
         >
           ⬅ Back
         </button>
@@ -631,7 +631,7 @@ export default function UserManagerPage() {
           />
           <button
             type="submit"
-            className="bg-blue-500 text-white px-4 py-2 rounded"
+            className="bg-blue-400 hover:bg-blue-500 text-white px-4 py-2 rounded"
           >
             Add
           </button>
@@ -646,7 +646,7 @@ export default function UserManagerPage() {
           </div>
           <button
             onClick={() => setShowAdmissionModal(true)}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
           >
             + Create New Admission
           </button>
@@ -697,12 +697,12 @@ export default function UserManagerPage() {
                         <h3 className="font-semibold text-gray-800">{c.name}</h3>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
+                        <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-600">
                           {classStudents.length} student{classStudents.length === 1 ? '' : 's'}
                         </span>
                         <button
                           onClick={() => openEditClass(c)}
-                          className="text-sm bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded"
+                          className="text-sm bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded"
                         >
                           Edit
                         </button>
@@ -826,7 +826,7 @@ export default function UserManagerPage() {
 
             <button
               type="submit"
-              className="bg-blue-500 text-white px-4 py-2 rounded"
+              className="bg-blue-400 hover:bg-blue-500 text-white px-4 py-2 rounded"
             >
               Assign Selected
             </button>
@@ -975,7 +975,7 @@ export default function UserManagerPage() {
 
             <button
               type="submit"
-              className="bg-blue-500 text-white px-4 py-2 rounded"
+              className="bg-blue-400 hover:bg-blue-500 text-white px-4 py-2 rounded"
             >
               Assign Course
             </button>
@@ -1032,7 +1032,7 @@ export default function UserManagerPage() {
                       <td className="border p-2">
                         <button
                           onClick={() => openEditStudent(s)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                          className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
                         >
                           Edit
                         </button>
@@ -1097,8 +1097,8 @@ export default function UserManagerPage() {
                     placeholder="Enter class name"
                   />
                 </div>
-                <button type="submit" className="h-10 mt-6 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">Rename</button>
-                <button type="button" onClick={handleDeleteClass} className="h-10 mt-6 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Delete Class</button>
+                <button type="submit" className="h-10 mt-6 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded">Rename</button>
+                <button type="button" onClick={handleDeleteClass} className="h-10 mt-6 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">Delete Class</button>
               </form>
 
               <div className="border rounded p-3">
@@ -1138,7 +1138,7 @@ export default function UserManagerPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <button onClick={handleRemoveSelectedFromClass} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Remove from Class</button>
+                <button onClick={handleRemoveSelectedFromClass} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">Remove from Class</button>
                 <div className="flex items-center gap-2">
                   <select
                     value={moveTargetClassId}
@@ -1150,7 +1150,7 @@ export default function UserManagerPage() {
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
-                  <button onClick={handleMoveSelectedToClass} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">Move Selected</button>
+                  <button onClick={handleMoveSelectedToClass} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">Move Selected</button>
                 </div>
               </div>
 
@@ -1214,7 +1214,7 @@ export default function UserManagerPage() {
                       <button
                         onClick={handleRemoveCoursesFromClass}
                         disabled={selectedCoursesToRemove.length === 0}
-                        className="ml-auto bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-sm"
+                        className="ml-auto bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-sm"
                       >
                         Remove Selected Courses ({selectedCoursesToRemove.length})
                       </button>

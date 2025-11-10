@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, deleteDoc, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, updateDoc, getDoc, query, where } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import CheckAdminAuth from "@/lib/CheckAdminAuth";
@@ -26,6 +26,15 @@ export default function StudentListPage() {
   const [showEditFeeModal, setShowEditFeeModal] = useState(false);
   const [editFeeStudent, setEditFeeStudent] = useState(null);
   const [newTotalFee, setNewTotalFee] = useState("");
+  const [attendanceCounts, setAttendanceCounts] = useState({});
+  // Course-wise attendance (overall) modal state
+  const [allCourses, setAllCourses] = useState([]);
+  const [showAttendanceView, setShowAttendanceView] = useState(false);
+  const [attendanceStudent, setAttendanceStudent] = useState(null);
+  const [attendanceCourseId, setAttendanceCourseId] = useState("");
+  const [attendanceCalcLoading, setAttendanceCalcLoading] = useState(false);
+  const [attendanceStats, setAttendanceStats] = useState({ total: 0, present: 0, percent: 0, trainerPresent: 0, selfPresent: 0, unlocked: 0, attendedOfUnlocked: 0, percentOfUnlocked: 0 });
+  const [attendancePercentByStudent, setAttendancePercentByStudent] = useState({});
 
   // Enhanced error handling for authentication
   const handleAuthExpired = () => {
@@ -35,6 +44,152 @@ export default function StudentListPage() {
 
   useEffect(() => {
     fetchStudents();
+  }, []);
+
+  // Precompute attendance percentage per student (single primary course) for table column
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!students.length || !allCourses.length) {
+          setAttendancePercentByStudent({});
+          return;
+        }
+        const result = {};
+        for (const s of students) {
+          const titles = Array.isArray(s.coursesTitle) ? s.coursesTitle : (s.coursesTitle ? [s.coursesTitle] : []);
+          const matched = allCourses.find((c) => titles.includes(c.title));
+          const courseId = matched?.id;
+          if (!courseId) {
+            result[s.id] = "-";
+            continue;
+          }
+          // Compute quick percent using the same logic as modal, but per student and first course
+          try {
+            // Sets to accumulate sessions by chapterId
+            const trainerChapters = new Set();
+            const trainerPresentChapters = new Set();
+            const selfChapters = new Set();
+
+            const studentDocId = s.id;
+            const studentUid = s.uid || s.userId || null;
+            const classIds = Array.isArray(s.classIds) ? s.classIds : (s.classId ? [s.classId] : []);
+
+            // Trainer attendance
+            const attCol = collection(db, "attendance");
+            let trainerSnap;
+            try {
+              trainerSnap = await getDocs(query(attCol, where("type", "==", "trainer"), where("courseId", "==", courseId)));
+            } catch (_) {
+              const typeOnly = await getDocs(query(attCol, where("type", "==", "trainer")));
+              const docs = typeOnly.docs.filter((d) => (d.data()?.courseId || "") === courseId);
+              trainerSnap = { docs };
+            }
+            trainerSnap.docs.forEach((docSnap) => {
+              const data = docSnap.data() || {};
+              const chId = data.chapterId;
+              if (!chId) return;
+              if (classIds.length && data.classId && !classIds.includes(data.classId)) return;
+              trainerChapters.add(chId);
+              const arr = Array.isArray(data.present) ? data.present : [];
+              if (arr.includes(studentDocId)) trainerPresentChapters.add(chId);
+            });
+
+            // Self attendance
+            if (studentUid) {
+              let selfSnap;
+              try {
+                selfSnap = await getDocs(query(attCol, where("type", "==", "self"), where("courseId", "==", courseId), where("userId", "==", studentUid)));
+              } catch (_) {
+                try {
+                  const q1 = await getDocs(query(attCol, where("type", "==", "self"), where("userId", "==", studentUid)));
+                  const docs = q1.docs.filter((d) => (d.data()?.courseId || "") === courseId);
+                  selfSnap = { docs };
+                } catch {
+                  const q2 = await getDocs(query(attCol, where("type", "==", "self")));
+                  const docs = q2.docs.filter((d) => (d.data()?.courseId || "") === courseId && (d.data()?.userId || "") === studentUid);
+                  selfSnap = { docs };
+                }
+              }
+              selfSnap.docs.forEach((docSnap) => {
+                const data = docSnap.data() || {};
+                const chId = data.chapterId;
+                if (!chId) return;
+                selfChapters.add(chId);
+              });
+            }
+
+            const totalChapters = new Set([...trainerChapters, ...selfChapters]);
+            const selfOnlyPresent = new Set([...selfChapters].filter((ch) => !trainerChapters.has(ch)));
+            const presentChapters = new Set([...trainerPresentChapters, ...selfOnlyPresent]);
+            // Unlocked
+            const unlockedArr = (s.chapterAccess && s.chapterAccess[courseId]) || [];
+            const unlockedSet = new Set(Array.isArray(unlockedArr) ? unlockedArr : []);
+            const unlocked = unlockedSet.size;
+            const attendedOfUnlocked = unlocked > 0 ? [...presentChapters].filter((ch) => unlockedSet.has(ch)).length : 0;
+            const percentOfUnlocked = unlocked > 0 ? Math.round((attendedOfUnlocked / unlocked) * 100) : 0;
+            result[s.id] = unlocked > 0 ? `${unlocked} • ${percentOfUnlocked}%` : "-";
+          } catch {
+            result[s.id] = "-";
+          }
+        }
+        setAttendancePercentByStudent(result);
+      } catch {
+        setAttendancePercentByStudent({});
+      }
+    })();
+  }, [students, allCourses]);
+
+  // Load all courses once for mapping titles -> ids
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "courses"));
+        setAllCourses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (_) {
+        setAllCourses([]);
+      }
+    })();
+  }, []);
+
+  // Load attendance summary (last 30 days) for all students
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = new Date();
+        const since = new Date(today);
+        since.setDate(since.getDate() - 30);
+        const y = since.getFullYear();
+        const m = String(since.getMonth() + 1).padStart(2, "0");
+        const d = String(since.getDate()).padStart(2, "0");
+        const minDateStr = `${y}-${m}-${d}`;
+        const attCol = collection(db, "attendance");
+        let snap;
+        try {
+          // Preferred: filter by type and date range (may require composite index)
+          const attQuery = query(attCol, where("type", "==", "trainer"), where("date", ">=", minDateStr));
+          snap = await getDocs(attQuery);
+        } catch (indexErr) {
+          // Fallback: filter by type only, then filter by date in memory
+          const attQueryTypeOnly = query(attCol, where("type", "==", "trainer"));
+          snap = await getDocs(attQueryTypeOnly);
+        }
+        const counts = {};
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          const dateStr = String(data.date || "");
+          if (dateStr && dateStr >= minDateStr) {
+            const present = Array.isArray(data.present) ? data.present : [];
+            present.forEach((sid) => {
+              counts[sid] = (counts[sid] || 0) + 1;
+            });
+          }
+        });
+        setAttendanceCounts(counts);
+      } catch (e) {
+        // Non-blocking
+        console.warn("Failed to load attendance summary:", e);
+      }
+    })();
   }, []);
 
   // Fetch current user role
@@ -150,6 +305,128 @@ export default function StudentListPage() {
     } catch (e) {
       console.error("Failed to update total fee:", e);
       alert(e?.message || "Failed to update total fee");
+    }
+  }
+
+  // Open attendance view modal for a student
+  function openAttendanceView(student) {
+    setAttendanceStudent(student);
+    // Preselect the first matched course (by title) if available
+    const titles = Array.isArray(student.coursesTitle) ? student.coursesTitle : (student.coursesTitle ? [student.coursesTitle] : []);
+    const matched = allCourses.find((c) => titles.includes(c.title));
+    const courseId = matched?.id || "";
+    setAttendanceCourseId(courseId);
+    setShowAttendanceView(true);
+    if (courseId) {
+      // Compute immediately
+      void computeAttendancePercentage(student, courseId);
+    } else {
+      setAttendanceStats({ total: 0, present: 0, percent: 0 });
+    }
+  }
+
+  function closeAttendanceView() {
+    setShowAttendanceView(false);
+    setAttendanceStudent(null);
+    setAttendanceCourseId("");
+    setAttendanceStats({ total: 0, present: 0, percent: 0, trainerPresent: 0, selfPresent: 0, unlocked: 0, attendedOfUnlocked: 0, percentOfUnlocked: 0 });
+    setAttendanceStats({ total: 0, present: 0, percent: 0, trainerPresent: 0, selfPresent: 0, unlocked: 0, attendedOfUnlocked: 0, percentOfUnlocked: 0 });
+    setAttendanceCalcLoading(false);
+  }
+
+  async function computeAttendancePercentage(student, courseId) {
+    if (!student || !courseId) return;
+    setAttendanceCalcLoading(true);
+    try {
+      // Sets to accumulate sessions by chapterId
+      const trainerChapters = new Set();
+      const trainerPresentChapters = new Set();
+      const selfChapters = new Set();
+
+      const studentDocId = student.id;
+      const studentUid = student.uid || student.userId || null;
+      const classIds = Array.isArray(student.classIds)
+        ? student.classIds
+        : (student.classId ? [student.classId] : []);
+
+      // 1) Trainer attendance for this course (no date limit)
+      const attCol = collection(db, "attendance");
+      let trainerSnap;
+      try {
+        trainerSnap = await getDocs(query(attCol, where("type", "==", "trainer"), where("courseId", "==", courseId)));
+      } catch (_) {
+        const typeOnly = await getDocs(query(attCol, where("type", "==", "trainer")));
+        const docs = typeOnly.docs.filter((d) => (d.data()?.courseId || "") === courseId);
+        trainerSnap = { docs };
+      }
+      trainerSnap.docs.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        const chId = data.chapterId;
+        if (!chId) return;
+        if (classIds.length && data.classId && !classIds.includes(data.classId)) return;
+        trainerChapters.add(chId);
+        const arr = Array.isArray(data.present) ? data.present : [];
+        if (arr.includes(studentDocId)) trainerPresentChapters.add(chId);
+      });
+
+      // 2) Self attendance for this course by this student (if uid known)
+      if (studentUid) {
+        let selfSnap;
+        try {
+          selfSnap = await getDocs(query(attCol, where("type", "==", "self"), where("courseId", "==", courseId), where("userId", "==", studentUid)));
+        } catch (_) {
+          // Fallbacks
+          try {
+            const q1 = await getDocs(query(attCol, where("type", "==", "self"), where("userId", "==", studentUid)));
+            const docs = q1.docs.filter((d) => (d.data()?.courseId || "") === courseId);
+            selfSnap = { docs };
+          } catch {
+            const q2 = await getDocs(query(attCol, where("type", "==", "self")));
+            const docs = q2.docs.filter((d) => (d.data()?.courseId || "") === courseId && (d.data()?.userId || "") === studentUid);
+            selfSnap = { docs };
+          }
+        }
+        selfSnap.docs.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          const chId = data.chapterId;
+          if (!chId) return;
+          selfChapters.add(chId);
+        });
+      }
+
+      // Total sessions = unique chapters seen in trainer attendance or self (if no trainer record exists for that chapter)
+      const totalChapters = new Set([...trainerChapters, ...selfChapters]);
+      // Present = trainer-present chapters + self chapters where trainer didn't take attendance for that chapter
+      const selfOnlyPresent = new Set([...selfChapters].filter((ch) => !trainerChapters.has(ch)));
+      const presentChapters = new Set([...trainerPresentChapters, ...selfOnlyPresent]);
+
+      const total = totalChapters.size;
+      const present = presentChapters.size;
+      const percent = total > 0 ? Math.round((present / total) * 100) : 0;
+
+      // Unlocked chapters for this student for this course from student doc
+      const unlockedArr = (student.chapterAccess && student.chapterAccess[courseId]) || [];
+      const unlockedSet = new Set(Array.isArray(unlockedArr) ? unlockedArr : []);
+      const unlocked = unlockedSet.size;
+      // Attended among unlocked
+      const attendedOfUnlocked = unlocked > 0 ? [...presentChapters].filter((ch) => unlockedSet.has(ch)).length : present;
+      const percentOfUnlocked = unlocked > 0 ? Math.round((attendedOfUnlocked / unlocked) * 100) : percent;
+
+      setAttendanceStats({
+        total,
+        present,
+        percent,
+        trainerPresent: trainerPresentChapters.size,
+        selfPresent: selfOnlyPresent.size,
+        unlocked,
+        attendedOfUnlocked,
+        percentOfUnlocked,
+      });
+    } catch (e) {
+      console.warn("Failed to compute attendance %:", e);
+      setAttendanceStats({ total: 0, present: 0, percent: 0, trainerPresent: 0, selfPresent: 0, unlocked: 0, attendedOfUnlocked: 0, percentOfUnlocked: 0 });
+    } finally {
+      setAttendanceCalcLoading(false);
     }
   }
 
@@ -460,8 +737,8 @@ export default function StudentListPage() {
           disabled={isProcessingPayment}
           className={`mb-4 px-4 py-2 rounded ${
             isProcessingPayment 
-              ? "bg-gray-400 cursor-not-allowed" 
-              : "bg-gray-500 hover:bg-gray-600"
+              ? "bg-gray-300 cursor-not-allowed" 
+              : "bg-gray-400 hover:bg-gray-500"
           } text-white`}
         >
           ⬅ Back
@@ -513,6 +790,7 @@ export default function StudentListPage() {
                   <th className="border p-2">Course</th>
                   <th className="border p-2">Total Fee</th>
                   <th className="border p-2">Due</th>
+                  <th className="border p-2">Attendance %</th>
                   <th className="border p-2">Lock</th>
                   <th className="border p-2 min-w-[320px]">Action</th>
                 </tr>
@@ -549,6 +827,22 @@ export default function StudentListPage() {
                     <td className="border p-2">{s.totalFee || "-"}</td>
                     <td className="border p-2">{Number(s.totalFee ?? 0) - Number(s.PayedFee ?? s.payedFee ?? 0)}</td>
                   <td className="border p-2 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <span>{attendancePercentByStudent[s.id] ?? "-"}</span>
+                      <button
+                        onClick={() => openAttendanceView(s)}
+                        disabled={isProcessingPayment}
+                        className={`px-2 py-0.5 rounded text-xs ${
+                          isProcessingPayment
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-blue-500 hover:bg-blue-600"
+                        } text-white`}
+                      >
+                        View
+                      </button>
+                    </div>
+                  </td>
+                  <td className="border p-2 text-center">
                     <label className="inline-flex items-center cursor-pointer select-none">
                       <span className="mr-2 text-xs font-medium text-gray-700">
                         {Boolean(s.locked) ? "Locked" : "Unlocked"}
@@ -567,7 +861,7 @@ export default function StudentListPage() {
                           }
                         }}
                       />
-                      <div className={`relative w-11 h-6 rounded-full transition-colors ${Boolean(s.locked) ? "bg-yellow-500" : "bg-gray-300"} peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500`}>
+                      <div className={`relative w-11 h-6 rounded-full transition-colors ${Boolean(s.locked) ? "bg-yellow-400" : "bg-gray-300"} peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-400`}>
                         <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${Boolean(s.locked) ? "translate-x-5" : "translate-x-0"}`}></div>
                       </div>
                     </label>
@@ -579,8 +873,8 @@ export default function StudentListPage() {
                       disabled={isProcessingPayment}
                       className={`px-3 py-1 rounded ${
                         isProcessingPayment 
-                          ? "bg-gray-400 cursor-not-allowed" 
-                          : "bg-green-600 hover:bg-green-700"
+                          ? "bg-gray-300 cursor-not-allowed" 
+                          : "bg-green-500 hover:bg-green-600"
                       } text-white`}
                     >
                       Pay Fee
@@ -598,8 +892,8 @@ export default function StudentListPage() {
                       disabled={isProcessingPayment}
                       className={`px-3 py-1 rounded ${
                         isProcessingPayment 
-                          ? "bg-gray-400 cursor-not-allowed" 
-                          : "bg-indigo-600 hover:bg-indigo-700"
+                          ? "bg-gray-300 cursor-not-allowed" 
+                          : "bg-indigo-500 hover:bg-indigo-600"
                       } text-white`}
                     >
                       Generate Certificate
@@ -609,8 +903,8 @@ export default function StudentListPage() {
                       disabled={isProcessingPayment || waSendingId === s.id}
                       className={`px-3 py-1 rounded ${
                         isProcessingPayment || waSendingId === s.id
-                          ? "bg-gray-400 cursor-not-allowed"
-                          : "bg-emerald-600 hover:bg-emerald-700"
+                          ? "bg-gray-300 cursor-not-allowed"
+                          : "bg-emerald-500 hover:bg-emerald-600"
                       } text-white`}
                     >
                       {waSendingId === s.id ? "Sending..." : "WhatsApp"}
@@ -621,8 +915,8 @@ export default function StudentListPage() {
                         disabled={isProcessingPayment}
                         className={`px-3 py-1 rounded ${
                           isProcessingPayment 
-                            ? "bg-gray-400 cursor-not-allowed" 
-                            : "bg-purple-600 hover:bg-purple-700"
+                            ? "bg-gray-300 cursor-not-allowed" 
+                            : "bg-purple-500 hover:bg-purple-600"
                         } text-white`}
                       >
                         Edit Fee
@@ -633,8 +927,8 @@ export default function StudentListPage() {
                       disabled={isProcessingPayment}
                       className={`px-3 py-1 rounded ${
                         isProcessingPayment 
-                          ? "bg-gray-400 cursor-not-allowed" 
-                          : "bg-red-500 hover:bg-red-600"
+                          ? "bg-gray-300 cursor-not-allowed" 
+                          : "bg-red-400 hover:bg-red-500"
                       } text-white`}
                     >
                       Delete
@@ -656,25 +950,25 @@ export default function StudentListPage() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-lg border text-center">
-                <div className="text-2xl font-bold text-blue-600">
+                <div className="text-2xl font-bold text-blue-500">
                   {students.length}
                 </div>
                 <div className="text-sm text-gray-600">Total Students</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
-                <div className="text-2xl font-bold text-green-600">
+                <div className="text-2xl font-bold text-green-500">
                   ₹{students.reduce((sum, s) => sum + Number(s.totalFee ?? 0), 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-gray-600">Total Fee</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
-                <div className="text-2xl font-bold text-blue-600">
+                <div className="text-2xl font-bold text-blue-500">
                   ₹{students.reduce((sum, s) => sum + Number(s.PayedFee ?? s.payedFee ?? 0), 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-gray-600">Total Paid</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
-                <div className="text-2xl font-bold text-red-600">
+                <div className="text-2xl font-bold text-red-500">
                   ₹{students.reduce((sum, s) => {
                     const totalFee = Number(s.totalFee ?? 0);
                     const paidFee = Number(s.PayedFee ?? s.payedFee ?? 0);
@@ -682,6 +976,87 @@ export default function StudentListPage() {
                   }, 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-gray-600">Pending Amount</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Attendance View Modal (Course-wise percentage, not time-limited) */}
+        {showAttendanceView && attendanceStudent && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full mx-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold">Attendance — {attendanceStudent.name || '-'}</h3>
+                <button onClick={closeAttendanceView} className="text-gray-600 hover:text-gray-800">✕</button>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Course</label>
+                <select
+                  value={attendanceCourseId}
+                  onChange={async (e) => {
+                    const id = e.target.value;
+                    setAttendanceCourseId(id);
+                    await computeAttendancePercentage(attendanceStudent, id);
+                  }}
+                  className="w-full border rounded px-3 py-2"
+                >
+                  <option value="">Choose...</option>
+                  {(() => {
+                    const titles = Array.isArray(attendanceStudent.coursesTitle)
+                      ? attendanceStudent.coursesTitle
+                      : (attendanceStudent.coursesTitle ? [attendanceStudent.coursesTitle] : []);
+                    // Map student course titles to existing course documents
+                    const options = allCourses.filter((c) => titles.includes(c.title));
+                    return options.map((c) => (
+                      <option key={c.id} value={c.id}>{c.title}</option>
+                    ));
+                  })()}
+                </select>
+                {attendanceCourseId === "" && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Select a course to calculate attendance percentage.
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-gray-50 rounded-lg border p-4">
+                {attendanceCalcLoading ? (
+                  <div className="text-center text-sm text-gray-600">Calculating…</div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 text-center mb-3">
+                      <div>
+                        <div className="text-xl font-bold text-green-500">{attendanceStats.present}</div>
+                        <div className="text-xs text-gray-600">Present</div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-bold text-indigo-500">{attendanceStats.percentOfUnlocked}%</div>
+                        <div className="text-xs text-gray-600">Attendance (of unlocked)</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div>
+                        <div className="text-lg font-semibold text-sky-500">{attendanceStats.trainerPresent}</div>
+                        <div className="text-xs text-gray-600">Trainer Presents</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-semibold text-emerald-500">{attendanceStats.selfPresent}</div>
+                        <div className="text-xs text-gray-600">Self Presents</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-semibold text-purple-500">{attendanceStats.unlocked}</div>
+                        <div className="text-xs text-gray-600">Total Unlocked Classes</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <button onClick={closeAttendanceView} className="px-4 py-2 rounded bg-gray-500 hover:bg-gray-600 text-white">
+                  Close
+                </button>
               </div>
             </div>
           </div>
@@ -789,10 +1164,10 @@ export default function StudentListPage() {
                   disabled={isProcessingPayment}
                   className={`flex-1 px-4 py-2 rounded flex items-center justify-center gap-2 ${
                     isProcessingPayment 
-                      ? "bg-gray-400 cursor-not-allowed" 
+                      ? "bg-gray-300 cursor-not-allowed" 
                       : paymentMethod === "online"
-                      ? "bg-blue-600 hover:bg-blue-700"
-                      : "bg-green-600 hover:bg-green-700"
+                      ? "bg-blue-500 hover:bg-blue-600"
+                      : "bg-green-500 hover:bg-green-600"
                   } text-white`}
                 >
                   {isProcessingPayment ? (
@@ -817,8 +1192,8 @@ export default function StudentListPage() {
                   disabled={isProcessingPayment}
                   className={`flex-1 px-4 py-2 rounded ${
                     isProcessingPayment 
-                      ? "bg-gray-400 cursor-not-allowed" 
-                      : "bg-gray-500 hover:bg-gray-600"
+                      ? "bg-gray-300 cursor-not-allowed" 
+                      : "bg-gray-400 hover:bg-gray-500"
                   } text-white`}
                 >
                   Cancel
@@ -850,7 +1225,7 @@ export default function StudentListPage() {
         {isProcessingPayment && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white p-8 rounded-lg shadow-lg text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
               <h3 className="text-lg font-semibold mb-2">
                 {paymentMethod === "online" ? "Processing Online Payment..." : "Recording Cash Payment..."}
               </h3>

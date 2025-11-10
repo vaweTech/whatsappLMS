@@ -10,6 +10,7 @@ export default function TrainerHome() {
   const [userId, setUserId] = useState("");
   const [classes, setClasses] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [students, setStudents] = useState([]);
   const [allowedClasses, setAllowedClasses] = useState([]);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [classCourses, setClassCourses] = useState([]);
@@ -20,6 +21,11 @@ export default function TrainerHome() {
   const [chapters, setChapters] = useState([]);
   const [selectedChapters, setSelectedChapters] = useState([]);
   const [unlockStudents, setUnlockStudents] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceCourse, setAttendanceCourse] = useState(null);
+  const [attendanceChapterId, setAttendanceChapterId] = useState("");
+  const [attendanceSelectedIds, setAttendanceSelectedIds] = useState([]);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -37,6 +43,12 @@ export default function TrainerHome() {
       setClasses(cSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       const allCourses = crSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setCourses(allCourses);
+
+      // Load all students once for attendance
+      try {
+        const sSnap = await getDocs(collection(db, "students"));
+        setStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (_) {}
       // Do not auto-select a class; require explicit click
     });
     return () => unsub();
@@ -284,6 +296,88 @@ export default function TrainerHome() {
     }
   };
 
+  // Attendance helpers
+  const openAttendanceForCourse = async (course) => {
+    if (!selectedClassId) {
+      setUnlockStatus('Please select a class first.');
+      return;
+    }
+    setAttendanceCourse(course);
+    // Load chapters for this course into existing chapters state
+    await loadChapters(course.id);
+    // Preselect none
+    setAttendanceChapterId("");
+    setAttendanceSelectedIds([]);
+    setShowAttendanceModal(true);
+  };
+
+  const toggleAttendanceStudent = (studentId) => {
+    setAttendanceSelectedIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const saveAttendance = async () => {
+    if (!attendanceCourse || !attendanceChapterId || !selectedClassId) {
+      alert("Select a chapter and class first.");
+      return;
+    }
+    setAttendanceSaving(true);
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const key = `class:${selectedClassId}|course:${attendanceCourse.id}|chapter:${attendanceChapterId}|${ymd}`;
+      const ref = doc(db, "attendance", key);
+      await setDoc(
+        ref,
+        {
+          type: "trainer",
+          classId: selectedClassId,
+          courseId: attendanceCourse.id,
+          chapterId: attendanceChapterId,
+          date: ymd,
+          present: attendanceSelectedIds,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setShowAttendanceModal(false);
+      setAttendanceCourse(null);
+      setAttendanceChapterId("");
+      setAttendanceSelectedIds([]);
+      alert("Attendance saved.");
+    } catch (e) {
+      alert(e?.message || "Failed to save attendance");
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
+
+  // Open a 5-minute self-attendance window (students can mark themselves)
+  const giveAttendanceWindow = async () => {
+    if (!attendanceCourse || !attendanceChapterId || !selectedClassId) {
+      alert("Select a chapter and class first.");
+      return;
+    }
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      await setDoc(doc(collection(db, "attendance")), {
+        type: "window",
+        classId: selectedClassId,
+        courseId: attendanceCourse.id,
+        chapterId: attendanceChapterId,
+        date: ymd,
+        openedAt: serverTimestamp(),
+        durationMs: 5 * 60 * 1000,
+      });
+      alert("Self attendance enabled for 5 minutes for this day.");
+      // Keep modal open so trainer can also save later if needed
+    } catch (e) {
+      alert(e?.message || "Failed to enable self attendance window");
+    }
+  };
+
   return (
     <CheckTrainerAuth>
       <div className="p-6 max-w-5xl mx-auto">
@@ -341,13 +435,21 @@ export default function TrainerHome() {
                 {classCourses.map((cr) => (
                   <li key={cr.id} className="flex items-center justify-between border rounded p-2">
                     <span>{cr.title || cr.id}</span>
-                    <button 
-                      className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded"
-                      onClick={() => handleCourseUnlock(cr)}
-                      disabled={unlockLoading}
-                    >
-                      {unlockLoading ? 'Unlocking...' : 'Click to Unlock'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded"
+                        onClick={() => handleCourseUnlock(cr)}
+                        disabled={unlockLoading}
+                      >
+                        {unlockLoading ? 'Unlocking...' : 'Click to Unlock'}
+                      </button>
+                      <button
+                        className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded"
+                        onClick={() => openAttendanceForCourse(cr)}
+                      >
+                        Take Attendance
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -422,6 +524,150 @@ export default function TrainerHome() {
                   }`}
                 >
                   {unlockLoading ? 'Unlocking...' : `Unlock ${selectedChapters.length} Chapter${selectedChapters.length !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Attendance Modal */}
+        {showAttendanceModal && attendanceCourse && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl mx-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">Take Attendance — {attendanceCourse.title || attendanceCourse.id}</h2>
+                <button
+                  onClick={() => {
+                    setShowAttendanceModal(false);
+                    setAttendanceCourse(null);
+                    setAttendanceChapterId("");
+                    setAttendanceSelectedIds([]);
+                  }}
+                  className="text-gray-600 hover:text-gray-800"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="text-xs text-gray-600 mb-3">
+                Today: {(() => {
+                  const d = new Date();
+                  const y = d.getFullYear();
+                  const m = String(d.getMonth() + 1).padStart(2, "0");
+                  const day = String(d.getDate()).padStart(2, "0");
+                  return `${y}-${m}-${day}`;
+                })()}
+              </div>
+
+              {/* Select Chapter */}
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Chapter (Day)</label>
+                <select
+                  value={attendanceChapterId}
+                  onChange={(e) => setAttendanceChapterId(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                >
+                  <option value="">Select chapter...</option>
+                  {chapters.map((ch, idx) => (
+                    <option key={ch.id} value={ch.id}>
+                      Day {idx + 1}: {ch.title || ch.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Students list */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold">Students in selected class</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="text-sm bg-gray-200 px-3 py-1 rounded"
+                      onClick={() => {
+                        const studentsInClass = classes.length
+                          ? students.filter((s) =>
+                              Array.isArray(s.classIds) ? s.classIds.includes(selectedClassId) : s.classId === selectedClassId
+                            )
+                          : [];
+                        setAttendanceSelectedIds(studentsInClass.map((s) => s.id));
+                      }}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      className="text-sm bg-gray-200 px-3 py-1 rounded"
+                      onClick={() => setAttendanceSelectedIds([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-60 overflow-auto border rounded">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="p-2 text-left">Present</th>
+                        <th className="p-2 text-left">Name</th>
+                        <th className="p-2 text-left">Email</th>
+                        <th className="p-2 text-left">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {students
+                        .filter((s) =>
+                          Array.isArray(s.classIds) ? s.classIds.includes(selectedClassId) : s.classId === selectedClassId
+                        )
+                        .map((s) => (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">
+                              <input
+                                type="checkbox"
+                                checked={attendanceSelectedIds.includes(s.id)}
+                                onChange={() => toggleAttendanceStudent(s.id)}
+                              />
+                            </td>
+                            <td className="p-2">{s.name || '-'}</td>
+                            <td className="p-2">{s.email || '-'}</td>
+                            <td className="p-2">{s.phone || s.phone1 || '-'}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowAttendanceModal(false);
+                    setAttendanceCourse(null);
+                    setAttendanceChapterId("");
+                    setAttendanceSelectedIds([]);
+                  }}
+                  className="px-4 py-2 border rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={giveAttendanceWindow}
+                  disabled={!attendanceChapterId}
+                  className={`px-4 py-2 rounded border ${
+                    !attendanceChapterId ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white hover:bg-gray-50'
+                  }`}
+                  title="Open self attendance for 5 minutes (no need to select students)"
+                >
+                  Give Attendance
+                </button>
+                <button
+                  onClick={saveAttendance}
+                  disabled={attendanceSaving || !attendanceChapterId || attendanceSelectedIds.length === 0}
+                  className={`px-4 py-2 rounded text-white ${
+                    attendanceSaving || !attendanceChapterId || attendanceSelectedIds.length === 0
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                >
+                  {attendanceSaving ? 'Saving...' : `Save Attendance (${attendanceSelectedIds.length})`}
                 </button>
               </div>
             </div>

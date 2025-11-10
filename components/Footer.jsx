@@ -157,20 +157,7 @@ export default function Footer() {
                 ))}
               </div>
 
-              {/* Newsletter */}
-              <div className="mt-4 sm:mt-6">
-                <h5 className="text-xs sm:text-sm font-medium mb-2 text-white">Stay Updated</h5>
-                <div className="flex w-full">
-                  <input
-                    type="email"
-                    placeholder="Enter your email"
-                    className="flex-1 px-2 py-1 sm:px-3 sm:py-2 bg-white/10 border border-white/20 rounded-l-lg text-white placeholder-slate-400 focus:outline-none focus:border-[#26ebe5] text-xs sm:text-sm"
-                  />
-                  <button className="px-3 sm:px-4 py-1 sm:py-2 bg-gradient-to-r from-[#00448a] to-[#f56c53] hover:from-[#003a76] hover:to-[#e65842] rounded-r-lg transition-all">
-                    <Mail className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
-                </div>
-              </div>
+              
             </motion.div>
           </div>
         </div>

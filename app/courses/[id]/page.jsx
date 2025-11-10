@@ -215,6 +215,22 @@ export default function CourseDetailsPage() {
   // Inline player for external links (live/recorded)
   const [customVideoDay, setCustomVideoDay] = useState(null);
   const [customVideoUrl, setCustomVideoUrl] = useState("");
+  const [presentChapterIds, setPresentChapterIds] = useState(new Set());
+  const [studentDocId, setStudentDocId] = useState(null);
+  const [trainerAttendanceByChapter, setTrainerAttendanceByChapter] = useState({});
+  const [studentClassIds, setStudentClassIds] = useState([]);
+  const [activeWindowChapterIds, setActiveWindowChapterIds] = useState(new Set());
+  // Trainer attendance (in-course) modal state
+  const [showTrainerAttendance, setShowTrainerAttendance] = useState(false);
+  const [attendanceClassId, setAttendanceClassId] = useState("");
+  const [attendanceChapterId, setAttendanceChapterId] = useState("");
+  const [attendanceSelectedIds, setAttendanceSelectedIds] = useState([]);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [classesWithCourse, setClassesWithCourse] = useState([]);
+  const [studentsInClass, setStudentsInClass] = useState([]);
+  // Course-wise attendance summary (last 30d)
+  const [attendanceCountsCourse, setAttendanceCountsCourse] = useState({});
+  const [summaryClassId, setSummaryClassId] = useState("");
 
   // Feedback state
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -299,6 +315,18 @@ export default function CourseDetailsPage() {
       if (studentData?.chapterAccess && studentData.chapterAccess[courseId]) {
         allowedChapters = studentData.chapterAccess[courseId];
       }
+
+       // Capture student's classes (supports legacy single classId and new classIds array)
+       try {
+         const classesArr = Array.isArray(studentData?.classIds)
+           ? studentData.classIds
+           : studentData?.classId
+           ? [studentData.classId]
+           : [];
+         setStudentClassIds(classesArr);
+       } catch (_) {
+         setStudentClassIds([]);
+       }
 
       // OPTIMIZATION 2: Parallel fetch of chapters and progress tests
       const [chapterSnap, progressTestSnap] = await Promise.all([
@@ -390,6 +418,67 @@ export default function CourseDetailsPage() {
         merged = Array.from(new Set([...(allowedChapters || []), ...(trainerAllowedChapters || [])]));
       }
       setAccessibleChapters(merged);
+      // Load student's self attendance for this course
+      try {
+        const atCol = collection(db, "attendance");
+        // Query by userId if stored; some student docs may use different ids; prefer auth uid
+        const qSnap = await getDocs(query(atCol, where("userId", "==", user.uid)));
+        const setIds = new Set();
+        qSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data?.courseId === courseId && data?.chapterId) {
+            setIds.add(data.chapterId);
+          }
+        });
+        setPresentChapterIds(setIds);
+      } catch (_) {}
+
+      // Resolve student's document id for trainer attendance matching
+      let resolvedStudentDocId = null;
+      try {
+        const directRef = doc(db, "students", user.uid);
+        const directSnap = await getDoc(directRef);
+        if (directSnap.exists()) {
+          resolvedStudentDocId = user.uid;
+        } else {
+          const sq = query(collection(db, "students"), where("uid", "==", user.uid));
+          const sSnap = await getDocs(sq);
+          if (!sSnap.empty) {
+            resolvedStudentDocId = sSnap.docs[0].id;
+          }
+        }
+      } catch (_) {}
+      setStudentDocId(resolvedStudentDocId);
+
+      // Load trainer attendance for this course and map by chapter
+      try {
+        const tSnap = await getDocs(
+          query(collection(db, "attendance"), where("courseId", "==", courseId), where("type", "==", "trainer"))
+        );
+        const map = {};
+         const d = new Date();
+         const todayYmd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        tSnap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const chId = data.chapterId;
+          if (!chId) return;
+           // Consider only today's attendance
+           if (String(data.date || "") !== todayYmd) return;
+           // Consider only records for student's classes (if available)
+           if (Array.isArray(classesArr) && classesArr.length > 0) {
+             if (!classesArr.includes(data.classId)) return;
+           }
+          const presentArr = Array.isArray(data.present) ? data.present : [];
+          const present = resolvedStudentDocId ? presentArr.includes(resolvedStudentDocId) : false;
+          // If multiple records exist for same chapter, prefer one that marks present, else last wins
+          if (!map[chId]) {
+            map[chId] = { taken: true, present };
+          } else {
+            map[chId] = { taken: true, present: map[chId].present || present };
+          }
+        });
+        setTrainerAttendanceByChapter(map);
+      } catch (_) {}
     } catch (err) {
       console.error("❌ Error fetching data:", err);
       setError("Failed to load course details. Please try again.");
@@ -409,6 +498,46 @@ export default function CourseDetailsPage() {
     });
     return () => unsubscribe();
   }, [fetchData]);
+
+  
+
+  
+
+  // Fetch course-wise attendance counts (last 30d), optionally filtered by class
+  useEffect(() => {
+    (async () => {
+      if (!courseIdState) return;
+      try {
+        const today = new Date();
+        const since = new Date(today);
+        since.setDate(since.getDate() - 30);
+        const y = since.getFullYear();
+        const m = String(since.getMonth() + 1).padStart(2, "0");
+        const d = String(since.getDate()).padStart(2, "0");
+        const minDateStr = `${y}-${m}-${d}`;
+        const attCol = collection(db, "attendance");
+        // Base query: this course, trainer taken, last 30 days
+        const baseQ = query(attCol, where("type", "==", "trainer"), where("courseId", "==", courseIdState), where("date", ">=", minDateStr));
+        const snap = await getDocs(baseQ);
+        const counts = {};
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          // If a class is selected for summary, only include that class
+          if (summaryClassId && data.classId !== summaryClassId) return;
+          const present = Array.isArray(data.present) ? data.present : [];
+          present.forEach((sid) => {
+            counts[sid] = (counts[sid] || 0) + 1;
+          });
+        });
+        setAttendanceCountsCourse(counts);
+      } catch (e) {
+        // Non-blocking
+        console.warn("Failed to load course attendance summary:", e);
+        setAttendanceCountsCourse({});
+      }
+    })();
+  }, [courseIdState, summaryClassId]);
+
 
   const getDaysUntilDue = (dueDate) => {
     if (!dueDate) return "No due date";
@@ -440,6 +569,225 @@ export default function CourseDetailsPage() {
   const handleCloseModal = () => {
     setShowProgressTestModal(false);
     setSelectedDayProgressTests([]);
+  };
+
+  const markPresent = async (chapterId) => {
+    try {
+      if (!currentUser || !courseIdState || !chapterId) return;
+      // If trainer has taken attendance for this chapter, follow trainer flow (do not allow self mark)
+      if (trainerAttendanceByChapter?.[chapterId]?.taken) {
+        alert("Trainer attendance recorded for this class. Your status follows trainer's record.");
+        return;
+      }
+      // Avoid duplicates
+      if (presentChapterIds.has(chapterId)) return;
+      const atCol = collection(db, "attendance");
+      await setDoc(
+        doc(atCol),
+        {
+          type: "self",
+          userId: currentUser.uid,
+          courseId: courseIdState,
+          chapterId,
+          submittedAt: serverTimestamp(),
+        }
+      );
+      setPresentChapterIds((prev) => new Set([...prev, chapterId]));
+    } catch (e) {
+      alert(e?.message || "Failed to mark present.");
+    }
+  };
+
+  // Load classes that include this course (for trainer attendance modal)
+  const loadClassesForCourse = useCallback(async () => {
+    if (!courseIdState) return;
+    try {
+      const snap = await getDocs(collection(db, "classes"));
+      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const filtered = all.filter((c) => Array.isArray(c.courseIds) && c.courseIds.includes(courseIdState));
+      setClassesWithCourse(filtered);
+    } catch (_) {
+      setClassesWithCourse([]);
+    }
+  }, [courseIdState]);
+
+  // Load students for selected class
+  const loadStudentsForClass = useCallback(async (classId) => {
+    if (!classId) {
+      setStudentsInClass([]);
+      return;
+    }
+    try {
+      const studentsCol = collection(db, "students");
+      const q1 = query(studentsCol, where("classId", "==", classId));
+      const q2 = query(studentsCol, where("classIds", "array-contains", classId));
+      const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+      const seen = new Set();
+      const list = [];
+      [...s1.docs, ...s2.docs].forEach((d) => {
+        if (!seen.has(d.id)) {
+          seen.add(d.id);
+          list.push({ id: d.id, ...d.data() });
+        }
+      });
+      setStudentsInClass(list);
+    } catch (_) {
+      setStudentsInClass([]);
+    }
+  }, []);
+
+  // Load students when class changes (for summary table)
+  useEffect(() => {
+    (async () => {
+      if (!summaryClassId) {
+        setStudentsInClass([]);
+        return;
+      }
+      await loadStudentsForClass(summaryClassId);
+    })();
+  }, [summaryClassId, loadStudentsForClass]);
+
+  // Load classes for trainer for summary section when course known and user is trainer/admin
+  useEffect(() => {
+    (async () => {
+      if (!isTrainerUser || !courseIdState) return;
+      await loadClassesForCourse();
+    })();
+  }, [isTrainerUser, courseIdState, loadClassesForCourse]);
+
+  const openTrainerAttendance = async () => {
+    await loadClassesForCourse();
+    setAttendanceClassId("");
+    setAttendanceChapterId("");
+    setAttendanceSelectedIds([]);
+    setShowTrainerAttendance(true);
+  };
+
+  const toggleAttendanceStudent = (sid) => {
+    setAttendanceSelectedIds((prev) =>
+      prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]
+    );
+  };
+
+  // Refresh active 5-min self-attendance windows for student's classes
+  const refreshActiveWindows = useCallback(async () => {
+    if (!courseIdState) return;
+    try {
+      const d = new Date();
+      const todayYmd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const snap = await getDocs(
+        query(collection(db, "attendance"), where("courseId", "==", courseIdState), where("type", "==", "window"))
+      );
+      const now = Date.now();
+      const setIds = new Set();
+      snap.docs.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        if (String(data.date || "") !== todayYmd) return;
+        if (Array.isArray(studentClassIds) && studentClassIds.length > 0) {
+          if (!studentClassIds.includes(data.classId)) return;
+        }
+        const openedAtMs =
+          typeof data.openedAt?.toMillis === "function" ? data.openedAt.toMillis() : (typeof data.openedAt === "number" ? data.openedAt : null);
+        const durationMs = Number(data.durationMs) || 5 * 60 * 1000;
+        if (openedAtMs == null) return;
+        if (now - openedAtMs <= durationMs) {
+          if (data.chapterId) setIds.add(data.chapterId);
+        }
+      });
+      setActiveWindowChapterIds(setIds);
+    } catch (_) {
+      setActiveWindowChapterIds(new Set());
+    }
+  }, [courseIdState, studentClassIds]);
+
+  const saveTrainerAttendance = async () => {
+    if (!attendanceClassId || !attendanceChapterId || !courseIdState) {
+      alert("Select class and day.");
+      return;
+    }
+    setAttendanceSaving(true);
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const payload = {
+        type: "trainer",
+        classId: attendanceClassId,
+        courseId: courseIdState,
+        chapterId: attendanceChapterId,
+        date: ymd,
+        present: attendanceSelectedIds,
+        submittedAt: serverTimestamp(),
+      };
+      await setDoc(doc(collection(db, "attendance")), payload);
+      alert("Attendance saved.");
+      setShowTrainerAttendance(false);
+      setAttendanceClassId("");
+      setAttendanceChapterId("");
+      setAttendanceSelectedIds([]);
+      // Refresh trainerAttendanceByChapter so indicators update
+      try {
+        const tSnap = await getDocs(
+          query(collection(db, "attendance"), where("courseId", "==", courseIdState), where("type", "==", "trainer"))
+        );
+        const map = {};
+        const todayYmd = ymd;
+        tSnap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const chId = data.chapterId;
+          if (!chId) return;
+          if (String(data.date || "") !== todayYmd) return;
+          if (Array.isArray(studentClassIds) && studentClassIds.length > 0) {
+            if (!studentClassIds.includes(data.classId)) return;
+          }
+          const presentArr = Array.isArray(data.present) ? data.present : [];
+          const present = studentDocId ? presentArr.includes(studentDocId) : false;
+          if (!map[chId]) map[chId] = { taken: true, present };
+          else map[chId] = { taken: true, present: map[chId].present || present };
+        });
+        setTrainerAttendanceByChapter(map);
+      } catch (_) {}
+    } catch (e) {
+      alert(e?.message || "Failed to save attendance.");
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
+
+  // Keep self-attendance window state fresh
+  useEffect(() => {
+    let intervalId;
+    (async () => {
+      await refreshActiveWindows();
+      intervalId = window.setInterval(refreshActiveWindows, 30000);
+    })();
+    return () => {
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [refreshActiveWindows]);
+
+  // Open a 5-minute self-attendance window for selected class and day
+  const openSelfWindow = async () => {
+    if (!attendanceClassId || !attendanceChapterId || !courseIdState) {
+      alert("Select class and day.");
+      return;
+    }
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      await setDoc(doc(collection(db, "attendance")), {
+        type: "window",
+        classId: attendanceClassId,
+        courseId: courseIdState,
+        chapterId: attendanceChapterId,
+        date: ymd,
+        openedAt: serverTimestamp(),
+        durationMs: 5 * 60 * 1000,
+      });
+      alert("Self attendance enabled for 5 minutes.");
+      await refreshActiveWindows();
+    } catch (e) {
+      alert(e?.message || "Failed to enable self attendance window.");
+    }
   };
 
   const getSubmissionStatus = (progressTestId) => {
@@ -669,6 +1017,27 @@ export default function CourseDetailsPage() {
           <p className="text-sm sm:text-base lg:text-lg text-gray-700 line-clamp-2 px-4">
             {course.description}
           </p>
+          <div className="mt-3 text-sm sm:text-base text-gray-800">
+            {(() => {
+              const total = chapters.length || 0;
+              // Compute attendance: trainer overrides self; if no trainer record, use self status
+              let presentCount = 0;
+              chapters.forEach((ch) => {
+                const t = trainerAttendanceByChapter?.[ch.id];
+                if (t?.taken) {
+                  if (t.present) presentCount += 1;
+                } else if (presentChapterIds.has(ch.id)) {
+                  presentCount += 1;
+                }
+              });
+              const percent = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+              return (
+                <span className="inline-block px-3 py-1 rounded bg-white border">
+                  Attendance: <strong>{presentCount}/{total}</strong> ({percent}%)
+                </span>
+              );
+            })()}
+          </div>
         </div>
 
         {/* Syllabus Overview */}
@@ -701,12 +1070,84 @@ export default function CourseDetailsPage() {
           </div>
         )}
 
+        {/* Trainer/Admin: Course Attendance (30d) Summary by Class */}
+        {isTrainerUser && (
+          <div className="max-w-3xl mx-auto mb-8 sm:mb-10 px-4">
+            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold mb-3 sm:mb-4 text-cyan-600">
+              Course Attendance (30d)
+            </h2>
+            <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-lg shadow-md border">
+              <div className="grid sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Select Class</label>
+                  <select
+                    value={summaryClassId}
+                    onChange={(e) => setSummaryClassId(e.target.value)}
+                    className="border rounded px-3 py-2 w-full"
+                  >
+                    <option value="">Choose...</option>
+                    {classesWithCourse.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name || c.id}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="text-sm text-gray-600 flex items-end">
+                  <span>Showing trainer-marked presents in last 30 days for this course</span>
+                </div>
+              </div>
+              {!summaryClassId ? (
+                <p className="text-sm text-gray-500">Choose a class to view student attendance.</p>
+              ) : (
+                <div className="overflow-auto border rounded">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="p-2 text-left">Name</th>
+                        <th className="p-2 text-left">Email</th>
+                        <th className="p-2 text-left">Phone</th>
+                        <th className="p-2 text-left">Attendance (30d)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {studentsInClass.length === 0 ? (
+                        <tr>
+                          <td className="p-2 text-gray-500" colSpan={4}>No students found for this class.</td>
+                        </tr>
+                      ) : (
+                        studentsInClass.map((s) => (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">{s.name || "-"}</td>
+                            <td className="p-2">{s.email || "-"}</td>
+                            <td className="p-2">{s.phone || s.phone1 || "-"}</td>
+                            <td className="p-2">{attendanceCountsCourse[s.id] || 0}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Chapters (Programme) */}
         <div className="max-w-3xl mx-auto px-4">
           <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold mb-4 sm:mb-5 lg:mb-6 text-cyan-600 flex items-center gap-2">
             <Calendar className="w-5 h-5 sm:w-6 sm:h-6" />
             Programme
           </h2>
+
+          {isTrainerUser && (
+            <div className="mb-3">
+              <button
+                onClick={openTrainerAttendance}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm"
+              >
+                Take Attendance
+              </button>
+            </div>
+          )}
 
           <div className="space-y-3 sm:space-y-4">
             {chapters.map((chapter, index) => {
@@ -778,6 +1219,63 @@ export default function CourseDetailsPage() {
 
                       {/* Buttons */}
                       <div className="flex flex-wrap gap-2 sm:gap-3 lg:gap-4">
+                        {/* Self Attendance (visible only when trainer enables 5-min window) */}
+                        {hasAccess && activeWindowChapterIds.has(chapter.id) && (
+                          <button
+                            onClick={() => markPresent(chapter.id)}
+                            disabled={presentChapterIds.has(chapter.id) || trainerAttendanceByChapter?.[chapter.id]?.taken}
+                            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg shadow-md transition text-xs sm:text-sm lg:text-base ${
+                              trainerAttendanceByChapter?.[chapter.id]?.taken
+                                ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
+                                : presentChapterIds.has(chapter.id)
+                                ? "bg-green-100 text-green-800 border border-green-300 cursor-default"
+                                : "bg-green-600 hover:bg-green-700 text-white"
+                            }`}
+                            title={
+                              trainerAttendanceByChapter?.[chapter.id]?.taken
+                                ? "Trainer attendance recorded"
+                                : presentChapterIds.has(chapter.id)
+                                ? "Marked Present"
+                                : "Mark Present (window open)"
+                            }
+                          >
+                            {trainerAttendanceByChapter?.[chapter.id]?.taken
+                              ? "Trainer Taken"
+                              : presentChapterIds.has(chapter.id)
+                              ? "Present ✓"
+                              : "Mark Present"}
+                          </button>
+                        )}
+
+                        {/* Status badges */}
+                        {(() => {
+                          const t = trainerAttendanceByChapter?.[chapter.id];
+                          if (t?.taken) {
+                            return (
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                                  t.present
+                                    ? "bg-blue-100 text-blue-800 border border-blue-300"
+                                    : "bg-gray-100 text-gray-700 border border-gray-300"
+                                }`}
+                                title="Trainer attendance"
+                              >
+                                Trainer: {t.present ? "Present" : "Absent"}
+                              </span>
+                            );
+                          }
+                          if (presentChapterIds.has(chapter.id)) {
+                            return (
+                              <span
+                                className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                title="Self attendance"
+                              >
+                                Self: Present
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                         {chapter.liveClassLink && (
                           <a
                             href={chapter.liveClassLink}
@@ -1233,6 +1731,163 @@ export default function CourseDetailsPage() {
               {/* Instructions */}
               <div className="absolute bottom-2 sm:bottom-4 left-1/2 transform -translate-x-1/2 z-10 bg-black/50 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm">
                 Press ESC or click the X button to exit fullscreen
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Trainer Attendance Modal */}
+        {isTrainerUser && showTrainerAttendance && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-lg font-semibold">Take Attendance</h3>
+                <button
+                  onClick={() => setShowTrainerAttendance(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                <div className="text-xs text-gray-600">
+                  Today: {(() => {
+                    const d = new Date();
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, "0");
+                    const day = String(d.getDate()).padStart(2, "0");
+                    return `${y}-${m}-${day}`;
+                  })()}
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Select Class</label>
+                    <select
+                      value={attendanceClassId}
+                      onChange={async (e) => {
+                        const id = e.target.value;
+                        setAttendanceClassId(id);
+                        setAttendanceSelectedIds([]);
+                        await loadStudentsForClass(id);
+                      }}
+                      className="border rounded px-3 py-2 w-full"
+                    >
+                      <option value="">Choose...</option>
+                      {classesWithCourse.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name || c.id}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Select Day</label>
+                    <select
+                      value={attendanceChapterId}
+                      onChange={(e) => setAttendanceChapterId(e.target.value)}
+                      className="border rounded px-3 py-2 w-full"
+                    >
+                      <option value="">Choose...</option>
+                      {chapters.map((ch, idx) => (
+                        <option key={ch.id} value={ch.id}>
+                          Day {idx + 1}: {ch.title || ch.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-600">
+                  Note: Use “Give Attendance” to allow students to self mark for 5 minutes (no need to select students). Use “Save Attendance” to record trainer-taken attendance for selected students.
+                </p>
+
+                <div className="border rounded">
+                  <div className="flex items-center justify-between p-2">
+                    <div className="font-medium text-sm">Students</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="text-xs bg-gray-100 px-2 py-1 rounded border"
+                        onClick={() => setAttendanceSelectedIds(studentsInClass.map((s) => s.id))}
+                        disabled={!studentsInClass.length}
+                      >
+                        Select All
+                      </button>
+                      <button
+                        className="text-xs bg-gray-100 px-2 py-1 rounded border"
+                        onClick={() => setAttendanceSelectedIds([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="p-2 text-left">Present</th>
+                          <th className="p-2 text-left">Name</th>
+                          <th className="p-2 text-left">Email</th>
+                          <th className="p-2 text-left">Phone</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentsInClass.map((s) => (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">
+                              <input
+                                type="checkbox"
+                                checked={attendanceSelectedIds.includes(s.id)}
+                                onChange={() => toggleAttendanceStudent(s.id)}
+                              />
+                            </td>
+                            <td className="p-2">{s.name || "-"}</td>
+                            <td className="p-2">{s.email || "-"}</td>
+                            <td className="p-2">{s.phone || s.phone1 || "-"}</td>
+                          </tr>
+                        ))}
+                        {!studentsInClass.length && (
+                          <tr>
+                            <td className="p-2 text-gray-500 text-sm" colSpan={4}>
+                              {attendanceClassId ? "No students in this class." : "Select a class to view students."}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 p-4 border-t">
+                <button
+                  onClick={() => setShowTrainerAttendance(false)}
+                  className="px-4 py-2 rounded border"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={openSelfWindow}
+                  disabled={!attendanceClassId || !attendanceChapterId}
+                  className={`px-4 py-2 rounded border ${
+                    !attendanceClassId || !attendanceChapterId
+                      ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                      : "bg-white hover:bg-gray-50"
+                  }`}
+                  title="Opens student self-attendance for 5 minutes"
+                >
+                  Give Attendance
+                </button>
+                <button
+                  onClick={saveTrainerAttendance}
+                  disabled={attendanceSaving || !attendanceClassId || !attendanceChapterId || attendanceSelectedIds.length === 0}
+                  className={`px-4 py-2 rounded text-white ${
+                    attendanceSaving || !attendanceClassId || !attendanceChapterId || attendanceSelectedIds.length === 0
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-indigo-600 hover:bg-indigo-700"
+                  }`}
+                >
+                  {attendanceSaving ? "Saving..." : `Save Attendance`}
+                </button>
               </div>
             </div>
           </div>
