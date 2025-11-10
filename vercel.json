@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "path": "/api/admin/fee-reminders",
+      "schedule": "30 12 */3 * *" 
+    }
+  ]
+}
+
