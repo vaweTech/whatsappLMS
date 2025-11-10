@@ -190,7 +190,7 @@ export default function CoursesPage() {
         >
           Choose your <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#26ebe5] to-[#f56c53] drop-shadow-lg">Learning Path</span>
         </h1>
-        <p className="text-center text-black mb-6 sm:mb-8 px-4 max-w-3xl mx-auto">
+        <p className="hidden md:block text-center text-black mb-6 sm:mb-8 px-4 max-w-3xl mx-auto">
           Explore our comprehensive programming courses designed to help you build a successful career in software development.
         </p>
 
@@ -309,9 +309,9 @@ export default function CoursesPage() {
                   <h3 className="text-base sm:text-lg lg:text-xl xl:text-2xl font-semibold mb-2 sm:mb-3 line-clamp-2 drop-shadow-md">
                     {course.title}
                   </h3>
-                  <p className="hidden md:block text-black text-xs md:text-sm mb-3 md:mb-4 line-clamp-2 md:line-clamp-3">
+                  {/* <p className="hidden md:block text-black text-xs md:text-sm mb-3 md:mb-4 line-clamp-2 md:line-clamp-3">
                     {course.description}
-                  </p>
+                  </p> */}
 
                   {/* Button with neon glow */}
                   <button className="w-full sm:w-auto px-4 py-2 sm:py-2.5 bg-[#00448a] hover:bg-[#003a76] text-white 
