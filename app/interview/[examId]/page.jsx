@@ -247,7 +247,7 @@ export default function TakeInterviewExamPage() {
               <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
                 <li>Time Limit: {Number(exam?.durationMinutes) || 0} minutes.</li>
                 <li>Total Questions: {exam?.questions?.length || 0} (MCQ: {mcqIndices.length}, Descriptive: {descIndices.length}).</li>
-                <li>Only one submission is allowed. After submission, no edits or resubmissions will be accepted.</li>
+                <li>Only one submission is allowed. After submission, edits or resubmissions will be not be allowed.</li>
                 <li>You can navigate between questions and mark them for review.</li>
                 <li>Do not refresh or close the tab during the exam.</li>
               </ul>

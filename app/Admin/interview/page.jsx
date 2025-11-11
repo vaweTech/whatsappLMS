@@ -21,6 +21,29 @@ export default function AdminInterviewExamsPage() {
 
   const mcqList = useMemo(() => questions.filter((q) => q.type === "mcq"), [questions]);
   const descList = useMemo(() => questions.filter((q) => q.type === "descriptive"), [questions]);
+  const SCOPE_ALL = "__ALL__";
+  const SCOPE_UNASSIGNED = "__UNASSIGNED__";
+  const [sections, setSections] = useState([]);
+  const [newSectionName, setNewSectionName] = useState("");
+  const [activeMcqScope, setActiveMcqScope] = useState(SCOPE_ALL);
+  const sectionNames = useMemo(() => {
+    const names = new Set(
+      (Array.isArray(sections) ? sections : [])
+        .map((s) => String(s || "").trim())
+        .filter(Boolean)
+    );
+    for (const q of mcqList) {
+      const s = String(q.section || "").trim();
+      if (s) names.add(s);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [sections, mcqList]);
+  const visibleMcqs = useMemo(() => {
+    if (activeMcqScope === SCOPE_ALL) return mcqList;
+    if (activeMcqScope === SCOPE_UNASSIGNED)
+      return mcqList.filter((q) => !String(q.section || "").trim());
+    return mcqList.filter((q) => String(q.section || "").trim() === activeMcqScope);
+  }, [mcqList, activeMcqScope]);
 
   // Results search state
   const [resultPhone, setResultPhone] = useState("");
@@ -137,6 +160,24 @@ export default function AdminInterviewExamsPage() {
         question: "",
         options: ["", "", "", ""],
         correctAnswers: [],
+        section: "",
+      },
+    ]);
+  };
+  const addMcqToCurrentScope = () => {
+    const sectionForNew =
+      activeMcqScope === SCOPE_ALL || activeMcqScope === SCOPE_UNASSIGNED
+        ? ""
+        : activeMcqScope;
+    setQuestions((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        type: "mcq",
+        question: "",
+        options: ["", "", "", ""],
+        correctAnswers: [],
+        section: sectionForNew,
       },
     ]);
   };
@@ -178,6 +219,7 @@ export default function AdminInterviewExamsPage() {
             correctAnswers: Array.isArray(q.correctAnswers)
               ? q.correctAnswers
               : [],
+            section: String(q.section || "").trim(),
           };
         }
         return {
@@ -193,6 +235,7 @@ export default function AdminInterviewExamsPage() {
           ? Number(durationMinutes)
           : 60,
         questions: cleanQuestions,
+        sections: sectionNames,
       };
 
       if (editingId) {
@@ -226,6 +269,9 @@ export default function AdminInterviewExamsPage() {
       setDurationMinutes(60);
       setQuestions([]);
       setEditingId(null);
+      setSections([]);
+      setNewSectionName("");
+      setActiveMcqScope(SCOPE_ALL);
     } catch (e) {
       setError("Failed to save exam. Please try again.");
     } finally {
@@ -251,10 +297,24 @@ export default function AdminInterviewExamsPage() {
             q?.type === "mcq"
               ? (Array.isArray(q?.correctAnswers) ? q.correctAnswers : [])
               : undefined,
+          section: q?.type === "mcq" ? String(q?.section || "") : undefined,
           maxScore: q?.type === "descriptive" ? (Number.isFinite(Number(q?.maxScore)) ? Number(q.maxScore) : 10) : undefined,
         }))
       : [];
     setQuestions(safe);
+    const incomingSections =
+      Array.isArray(exam.sections) && exam.sections.length > 0
+        ? exam.sections.map((s) => String(s || "").trim()).filter(Boolean)
+        : Array.from(
+            new Set(
+              safe
+                .filter((q) => q.type === "mcq")
+                .map((q) => String(q.section || "").trim())
+                .filter(Boolean)
+            )
+          );
+    setSections(incomingSections);
+    setActiveMcqScope(SCOPE_ALL);
     window?.scrollTo?.({ top: 0, behavior: "smooth" });
   };
 
@@ -264,6 +324,9 @@ export default function AdminInterviewExamsPage() {
     setDescription("");
     setDurationMinutes(60);
     setQuestions([]);
+    setSections([]);
+    setNewSectionName("");
+    setActiveMcqScope(SCOPE_ALL);
   };
 
   const handleDelete = async (examId) => {
@@ -339,8 +402,8 @@ export default function AdminInterviewExamsPage() {
                 <div>
                   <p className="font-medium text-gray-800">Bulk add MCQs from Excel</p>
                   <p className="text-xs text-gray-600">
-                    Accepted headers (case-insensitive): <strong>Question No. (optional), Question, Option A, Option B, Option C, Option D, Correct Answer</strong>.
-                    Also supported: <strong>option1..4</strong> and <strong>correct</strong>. The <strong>Correct Answer</strong> can be numbers (1-4) or letters (A-D), comma-separated for multiple answers.
+                    Accepted headers (case-insensitive): <strong>Question No. (optional), Question, Option A, Option B, Option C, Option D, Correct Answer, Section (optional)</strong>.
+                    Also supported: <strong>option1..4</strong> and <strong>correct</strong>. The <strong>Correct Answer</strong> can be numbers (1-4) or letters (A-D), comma-separated for multiple answers. Use <strong>Section</strong> to group MCQs.
                   </p>
                 </div>
                 {uploadInfo && <span className="text-xs text-cyan-700">{uploadInfo}</span>}
@@ -375,6 +438,7 @@ export default function AdminInterviewExamsPage() {
                     const idx3 = colIndex(["option3", "opt3", "c", "option c"]);
                     const idx4 = colIndex(["option4", "opt4", "d", "option d"]);
                     const idxC = colIndex(["correct answer", "correct", "answer", "answers", "right answer"]);
+                    const idxS = colIndex(["section", "topic", "category"]);
 
                     const mapCorrect = (cell) => {
                       if (cell == null) return [];
@@ -406,6 +470,14 @@ export default function AdminInterviewExamsPage() {
                       const o3 = idx3 >= 0 ? row[idx3] : "";
                       const o4 = idx4 >= 0 ? row[idx4] : "";
                       const corr = idxC >= 0 ? row[idxC] : "";
+                      let sec = idxS >= 0 ? row[idxS] : "";
+                      if (!(idxS >= 0)) {
+                        // Default to active scope when no Section column provided
+                        sec =
+                          activeMcqScope === SCOPE_ALL || activeMcqScope === SCOPE_UNASSIGNED
+                            ? ""
+                            : activeMcqScope;
+                      }
                       const questionText = String(q || "").trim();
                       if (!questionText) continue;
                       imported.push({
@@ -414,6 +486,7 @@ export default function AdminInterviewExamsPage() {
                         question: questionText,
                         options: [o1, o2, o3, o4].map((x) => String(x ?? "")),
                         correctAnswers: Array.from(new Set(mapCorrect(corr))),
+                        section: String(sec || "").trim(),
                       });
                     }
 
@@ -447,33 +520,107 @@ export default function AdminInterviewExamsPage() {
                   <option value="descriptive">Descriptive</option>
                 </select>
                 <button
-                  onClick={() => (questionType === "mcq" ? addMcqQuestion() : addDescriptiveQuestion())}
+                  onClick={() => (questionType === "mcq" ? addMcqToCurrentScope() : addDescriptiveQuestion())}
                   className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700"
                 >
                   Add Question
                 </button>
+              </div>
+              {/* Section manager and scope tabs for MCQs */}
+              <div className="mb-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveMcqScope(SCOPE_ALL)}
+                    className={`px-3 py-1.5 text-xs rounded-full border ${activeMcqScope === SCOPE_ALL ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}
+                  >
+                    All MCQs
+                  </button>
+                  {sectionNames.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setActiveMcqScope(name)}
+                      className={`px-3 py-1.5 text-xs rounded-full border ${activeMcqScope === name ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}
+                      title={`View MCQs in ${name}`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setActiveMcqScope(SCOPE_UNASSIGNED)}
+                    className={`px-3 py-1.5 text-xs rounded-full border ${activeMcqScope === SCOPE_UNASSIGNED ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}
+                    title="View MCQs with no section"
+                  >
+                    Unassigned
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    placeholder="New section name"
+                    className="border rounded-lg px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const n = String(newSectionName || "").trim();
+                      if (!n) return;
+                      setSections((prev) => Array.from(new Set([...(prev || []), n])));
+                      setNewSectionName("");
+                      setActiveMcqScope(n);
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900"
+                  >
+                    Add Section
+                  </button>
+                </div>
               </div>
 
               {/* MCQ Section */}
               {mcqList.length > 0 && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-base font-semibold text-gray-900">MCQ Questions</h3>
-                    <span className="text-xs text-gray-600">{mcqList.length} item(s)</span>
+                    <h3 className="text-base font-semibold text-gray-900">
+                      {activeMcqScope === SCOPE_ALL
+                        ? "MCQ Questions (All)"
+                        : activeMcqScope === SCOPE_UNASSIGNED
+                        ? "MCQ Questions (Unassigned)"
+                        : `MCQ Questions (${activeMcqScope})`}
+                    </h3>
+                    <span className="text-xs text-gray-600">{visibleMcqs.length} item(s)</span>
                   </div>
                   <div className="space-y-4">
-                    {mcqList.map((q, idx) => (
+                    {visibleMcqs.map((q, idx) => (
                       <div key={q.id} className="border rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-sm font-medium text-gray-700">
                             {idx + 1}. MCQ
                           </span>
-                          <button
-                            onClick={() => removeQuestion(q.id)}
-                            className="text-red-600 hover:text-red-700 text-sm"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <select
+                              value={String(q.section || "").trim()}
+                              onChange={(e) => updateQuestion(q.id, { section: e.target.value })}
+                              className="text-xs border rounded px-2 py-1"
+                              title="Change section"
+                            >
+                              <option value="">Unassigned</option>
+                              {sectionNames.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => removeQuestion(q.id)}
+                              className="text-red-600 hover:text-red-700 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                         <input
                           type="text"
