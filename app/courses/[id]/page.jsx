@@ -235,9 +235,6 @@ export default function CourseDetailsPage() {
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [classesWithCourse, setClassesWithCourse] = useState([]);
   const [studentsInClass, setStudentsInClass] = useState([]);
-  // Course-wise attendance summary (last 30d)
-  const [attendanceCountsCourse, setAttendanceCountsCourse] = useState({});
-  const [summaryClassId, setSummaryClassId] = useState("");
 
   // Feedback state
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -519,40 +516,7 @@ export default function CourseDetailsPage() {
 
   
 
-  // Fetch course-wise attendance counts (last 30d), optionally filtered by class
-  useEffect(() => {
-    (async () => {
-      if (!courseIdState) return;
-      try {
-        const today = new Date();
-        const since = new Date(today);
-        since.setDate(since.getDate() - 30);
-        const y = since.getFullYear();
-        const m = String(since.getMonth() + 1).padStart(2, "0");
-        const d = String(since.getDate()).padStart(2, "0");
-        const minDateStr = `${y}-${m}-${d}`;
-        const attCol = collection(db, "attendance");
-        // Base query: this course, trainer taken, last 30 days
-        const baseQ = query(attCol, where("type", "==", "trainer"), where("courseId", "==", courseIdState), where("date", ">=", minDateStr));
-        const snap = await getDocs(baseQ);
-        const counts = {};
-        snap.docs.forEach((docSnap) => {
-          const data = docSnap.data() || {};
-          // If a class is selected for summary, only include that class
-          if (summaryClassId && data.classId !== summaryClassId) return;
-          const present = Array.isArray(data.present) ? data.present : [];
-          present.forEach((sid) => {
-            counts[sid] = (counts[sid] || 0) + 1;
-          });
-        });
-        setAttendanceCountsCourse(counts);
-      } catch (e) {
-        // Non-blocking
-        console.warn("Failed to load course attendance summary:", e);
-        setAttendanceCountsCourse({});
-      }
-    })();
-  }, [courseIdState, summaryClassId]);
+  
 
 
   const getDaysUntilDue = (dueDate) => {
@@ -652,16 +616,7 @@ export default function CourseDetailsPage() {
     }
   }, []);
 
-  // Load students when class changes (for summary table)
-  useEffect(() => {
-    (async () => {
-      if (!summaryClassId) {
-        setStudentsInClass([]);
-        return;
-      }
-      await loadStudentsForClass(summaryClassId);
-    })();
-  }, [summaryClassId, loadStudentsForClass]);
+  
 
   // Load classes for trainer for summary section when course known and user is trainer/admin
   useEffect(() => {
@@ -1159,66 +1114,7 @@ export default function CourseDetailsPage() {
           </div>
         )}
 
-        {/* Trainer/Admin: Course Attendance (30d) Summary by Class */}
-        {isTrainerUser && (
-          <div className="max-w-3xl mx-auto mb-8 sm:mb-10 px-4">
-            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold mb-3 sm:mb-4 text-cyan-600">
-              Course Attendance (30d)
-            </h2>
-            <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-lg shadow-md border">
-              <div className="grid sm:grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Select Class</label>
-                  <select
-                    value={summaryClassId}
-                    onChange={(e) => setSummaryClassId(e.target.value)}
-                    className="border rounded px-3 py-2 w-full"
-                  >
-                    <option value="">Choose...</option>
-                    {classesWithCourse.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name || c.id}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="text-sm text-gray-600 flex items-end">
-                  <span>Showing trainer-marked presents in last 30 days for this course</span>
-                </div>
-              </div>
-              {!summaryClassId ? (
-                <p className="text-sm text-gray-500">Choose a class to view student attendance.</p>
-              ) : (
-                <div className="overflow-auto border rounded">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="p-2 text-left">Name</th>
-                        <th className="p-2 text-left">Email</th>
-                        <th className="p-2 text-left">Phone</th>
-                        <th className="p-2 text-left">Attendance (30d)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {studentsInClass.length === 0 ? (
-                        <tr>
-                          <td className="p-2 text-gray-500" colSpan={4}>No students found for this class.</td>
-                        </tr>
-                      ) : (
-                        studentsInClass.map((s) => (
-                          <tr key={s.id} className="border-t">
-                            <td className="p-2">{s.name || "-"}</td>
-                            <td className="p-2">{s.email || "-"}</td>
-                            <td className="p-2">{s.phone || s.phone1 || "-"}</td>
-                            <td className="p-2">{attendanceCountsCourse[s.id] || 0}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        
 
         {/* Chapters (Programme) */}
         <div className="max-w-3xl mx-auto px-4">
@@ -1227,16 +1123,7 @@ export default function CourseDetailsPage() {
             Programme
           </h2>
 
-          {isTrainerUser && (
-            <div className="mb-3">
-              <button
-                onClick={openTrainerAttendance}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm"
-              >
-                Take Attendance
-              </button>
-            </div>
-          )}
+          
 
           <div className="space-y-3 sm:space-y-4">
             {chapters.map((chapter, index) => {
