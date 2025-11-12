@@ -11,7 +11,7 @@ import {
   doc
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import CheckAdminAuth from "@/lib/CheckAdminAuth";
+import CheckDataEntryAuth from "@/lib/CheckDataEntryAuth";
 import readXlsxFile from 'read-excel-file';
 
 export default function AdminPage() {
@@ -814,7 +814,7 @@ export default function AdminPage() {
   }
 
   return (
-    <CheckAdminAuth>
+    <CheckDataEntryAuth>
     <div className="p-8 bg-gray-100 min-h-screen">
       <button
         onClick={() => router.back()}
@@ -2291,6 +2291,6 @@ Example:
           </div>
         </div>
       )}
-    </CheckAdminAuth>
+    </CheckDataEntryAuth>
   );
 }

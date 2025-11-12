@@ -46,7 +46,7 @@ async function uploadToCloudinary(file) {
     throw error;
   }
 }
-import CheckAdminAuth from "@/lib/CheckAdminAuth";
+import CheckDataEntryAuth from "@/lib/CheckDataEntryAuth";
 
 export default function ManageMCQs() {
   const [user, setUser] = useState(null);
@@ -851,7 +851,7 @@ export default function ManageMCQs() {
   if (courses.length === 0) return <div className="flex items-center justify-center min-h-screen"><div>No courses found. Please add courses first.</div></div>;
 
   return (
-    <CheckAdminAuth>
+    <CheckDataEntryAuth>
       <div className="p-6 bg-gray-100 min-h-screen">
         <div className="flex justify-between items-center mb-6">
           <Link href="/Admin">
@@ -1386,6 +1386,6 @@ export default function ManageMCQs() {
           })}
         </div>
       </div>
-    </CheckAdminAuth>
+    </CheckDataEntryAuth>
   );
 }

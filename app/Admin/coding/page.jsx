@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { mcqDb } from '@/lib/firebaseMCQs';
-import CheckAdminAuth from "@/lib/CheckAdminAuth";
+import CheckDataEntryAuth from "@/lib/CheckDataEntryAuth";
 
 export default function AddQuestionPage() {
   const [title, setTitle] = useState('');
@@ -202,7 +202,7 @@ export default function AddQuestionPage() {
   const availableTopics = [...new Set(questions.map(q => q.topic).filter(Boolean))];
 
   return (
-    <CheckAdminAuth>
+    <CheckDataEntryAuth>
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 p-6">
         <div className="max-w-6xl mx-auto">
           <button
@@ -516,6 +516,6 @@ Examples:
           </div>
         </div>
       </div>
-    </CheckAdminAuth>
+    </CheckDataEntryAuth>
   );
 }

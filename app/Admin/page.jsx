@@ -11,6 +11,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isDataEntry, setIsDataEntry] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,6 +22,7 @@ export default function AdminDashboard() {
         const snap = await firestoreHelpers.getDoc(ref);
         const userRole = snap.exists() ? snap.data().role : null;
         setIsAdmin(userRole === "admin" || userRole === "superadmin");
+        setIsDataEntry(userRole === "dataentry");
       }
       setLoading(false);
     });
@@ -32,7 +34,7 @@ export default function AdminDashboard() {
   }
 
   if (loading) return <div>Loading...</div>;
-  if (!user || !isAdmin) return <div>Access Denied</div>;
+  if (!user || (!isAdmin && !isDataEntry)) return <div>Access Denied</div>;
 
   return (
     <div className="relative p-8 min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -61,6 +63,7 @@ export default function AdminDashboard() {
       {/* Quick actions grid */}
       <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
        
+        {(isAdmin || isDataEntry) && (
         <Link href="Admin/mcqs">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-blue-50 border border-slate-200 hover:border-blue-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200 transition">
@@ -72,7 +75,9 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Add, edit, and delete multiple-choice questions.</p>
           </div>
         </Link>
+        )}
 
+        {(isAdmin || isDataEntry) && (
         <Link href="/Admin/coding">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-indigo-50 border border-slate-200 hover:border-indigo-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200 transition">
@@ -85,7 +90,9 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Create and manage programming challenges.</p>
           </div>
         </Link>
+        )}
 
+        {(isAdmin || isDataEntry) && (
         <Link href="/Admin/tutorials">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-amber-50 border border-slate-200 hover:border-amber-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200 transition">
@@ -98,6 +105,8 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Publish and update tutorials for learners.</p>
           </div>
         </Link>
+        )}
+         {isAdmin && (
          <Link href="/Admin/userManager">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-rose-50 border border-slate-200 hover:border-rose-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-rose-100 text-rose-600 ring-1 ring-rose-200 transition">
@@ -110,6 +119,8 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Manage users, classes and permissions.</p>
           </div>
         </Link>
+         )}
+        {isAdmin && (
         <Link href="/Admin/StudentInfo">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-teal-50 border border-slate-200 hover:border-teal-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-teal-100 text-teal-600 ring-1 ring-teal-200 transition">
@@ -121,7 +132,9 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">View and manage student information.</p>
           </div>
         </Link>
+        )}
 
+        {isAdmin && (
         <Link href="/Admin/assignments">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-purple-50 border border-slate-200 hover:border-purple-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-purple-100 text-purple-600 ring-1 ring-purple-200 transition">
@@ -137,6 +150,8 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Grade and review student progress tests.</p>
           </div>
         </Link>
+        )}
+        {isAdmin && (
         <Link href="/Admin/trainers">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-green-50 border border-slate-200 hover:border-green-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200 transition">
@@ -149,7 +164,9 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Create trainers and assign classes/courses.</p>
           </div>
         </Link>
+        )}
 
+        {isAdmin && (
         <Link href="/Admin/whatsapp">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-emerald-50 border border-slate-200 hover:border-emerald-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200 transition">
@@ -161,7 +178,9 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Send group messages by class and courses.</p>
           </div>
         </Link>
+        )}
 
+        {isAdmin && (
         <Link href="/Admin/programs">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-violet-50 border border-slate-200 hover:border-violet-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-violet-100 text-violet-600 ring-1 ring-violet-200 transition">
@@ -175,6 +194,8 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Create programs and manage batches/classes.</p>
           </div>
         </Link>
+        )}
+        {isAdmin && (
         <Link href="/Admin/interview">
           <div className="group p-6 rounded-2xl cursor-pointer text-center bg-cyan-50 border border-slate-200 hover:border-cyan-300 transition-all shadow-sm hover:shadow-md">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-100 text-cyan-600 ring-1 ring-cyan-200 transition">
@@ -186,6 +207,7 @@ export default function AdminDashboard() {
             <p className="text-sm text-slate-600">Create MCQ and descriptive interview tests.</p>
           </div>
         </Link>
+        )}
       </div>
     </div>
   );
