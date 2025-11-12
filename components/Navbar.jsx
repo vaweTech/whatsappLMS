@@ -360,7 +360,7 @@ export default function Navbar({
             <li key={link.href}>
               <Link
                 href={link.href}
-                className="flex items-center space-x-1 text-[#26ebe5] hover:text-white transition"
+                className="flex items-center space-x-1 text-white hover:text-[#26ebe5] transition"
               >
                 <link.icon className="w-5 h-5" />
                 <span>{link.label}</span>

@@ -15,6 +15,7 @@ import {
   orderBy,
   setDoc,
   serverTimestamp,
+  onSnapshot,
 } from "firebase/firestore";
 import CheckAuth from "../../../lib/CheckAuth";
 import Image from "next/image";
@@ -220,6 +221,12 @@ export default function CourseDetailsPage() {
   const [trainerAttendanceByChapter, setTrainerAttendanceByChapter] = useState({});
   const [studentClassIds, setStudentClassIds] = useState([]);
   const [activeWindowChapterIds, setActiveWindowChapterIds] = useState(new Set());
+  // Student unlocked chapters for this course (from chapterAccess)
+  const [studentUnlockedChapters, setStudentUnlockedChapters] = useState([]);
+  // Header attendance computed like Admin/StudentInfo
+  const [attUnlockedTotal, setAttUnlockedTotal] = useState(0);
+  const [attPresentOfUnlocked, setAttPresentOfUnlocked] = useState(0);
+  const [attPercent, setAttPercent] = useState(0);
   // Trainer attendance (in-course) modal state
   const [showTrainerAttendance, setShowTrainerAttendance] = useState(false);
   const [attendanceClassId, setAttendanceClassId] = useState("");
@@ -314,6 +321,15 @@ export default function CourseDetailsPage() {
 
       if (studentData?.chapterAccess && studentData.chapterAccess[courseId]) {
         allowedChapters = studentData.chapterAccess[courseId];
+      }
+      // Save student's unlocked chapters for header computation
+      try {
+        const unlocked = Array.isArray(studentData?.chapterAccess?.[courseId])
+          ? studentData.chapterAccess[courseId]
+          : [];
+        setStudentUnlockedChapters(unlocked);
+      } catch (_) {
+        setStudentUnlockedChapters([]);
       }
 
        // Capture student's classes (supports legacy single classId and new classIds array)
@@ -816,6 +832,91 @@ export default function CourseDetailsPage() {
     }
   };
 
+  // Compute course header attendance using Admin/StudentInfo logic
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!courseIdState) return;
+        // Build sets similar to Admin/StudentInfo
+        const trainerChapters = new Set();
+        const trainerPresentChapters = new Set();
+        // Fetch all trainer attendance for this course (all time)
+        try {
+          const tSnap = await getDocs(
+            query(collection(db, "attendance"), where("type", "==", "trainer"), where("courseId", "==", courseIdState))
+          );
+          tSnap.docs.forEach((docSnap) => {
+            const data = docSnap.data() || {};
+            const chId = data.chapterId;
+            if (!chId) return;
+            // If student has classIds, only consider those trainer records
+            if (Array.isArray(studentClassIds) && studentClassIds.length > 0) {
+              if (data.classId && !studentClassIds.includes(data.classId)) return;
+            }
+            trainerChapters.add(chId);
+            const pres = Array.isArray(data.present) ? data.present : [];
+            if (studentDocId && pres.includes(studentDocId)) {
+              trainerPresentChapters.add(chId);
+            }
+          });
+        } catch (_) {}
+        // Self attendance chapters already in presentChapterIds
+        const selfChapters = new Set(presentChapterIds);
+        // Self only where trainer has not taken attendance for that chapter
+        const selfOnlyPresent = new Set([...selfChapters].filter((ch) => !trainerChapters.has(ch)));
+        const presentChapters = new Set([...trainerPresentChapters, ...selfOnlyPresent]);
+        // Unlocked denominator from student's unlocked chapters
+        const unlockedSet = new Set(Array.isArray(studentUnlockedChapters) ? studentUnlockedChapters : []);
+        const unlocked = unlockedSet.size;
+        const attendedOfUnlocked = unlocked > 0 ? [...presentChapters].filter((ch) => unlockedSet.has(ch)).length : 0;
+        const percentOfUnlocked = unlocked > 0 ? Math.round((attendedOfUnlocked / unlocked) * 100) : 0;
+        setAttUnlockedTotal(unlocked);
+        setAttPresentOfUnlocked(attendedOfUnlocked);
+        setAttPercent(percentOfUnlocked);
+      } catch {
+        setAttUnlockedTotal(0);
+        setAttPresentOfUnlocked(0);
+        setAttPercent(0);
+      }
+    })();
+    // Recompute whenever relevant inputs change
+  }, [courseIdState, studentDocId, studentClassIds, studentUnlockedChapters, presentChapterIds, trainerAttendanceByChapter]);
+
+  // Live updates: reflect trainer-marked attendance instantly
+  useEffect(() => {
+    if (!courseIdState) return;
+    try {
+      const d = new Date();
+      const todayYmd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const attQuery = query(
+        collection(db, "attendance"),
+        where("type", "==", "trainer"),
+        where("courseId", "==", courseIdState),
+        where("date", "==", todayYmd)
+      );
+      const unsub = onSnapshot(attQuery, (snap) => {
+        const map = {};
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          const chId = data.chapterId;
+          if (!chId) return;
+          // If the student belongs to specific classes, only consider those records
+          if (Array.isArray(studentClassIds) && studentClassIds.length > 0) {
+            if (!studentClassIds.includes(data.classId)) return;
+          }
+          const presentArr = Array.isArray(data.present) ? data.present : [];
+          const present = studentDocId ? presentArr.includes(studentDocId) : false;
+          if (!map[chId]) map[chId] = { taken: true, present };
+          else map[chId] = { taken: true, present: map[chId].present || present };
+        });
+        setTrainerAttendanceByChapter(map);
+      });
+      return () => unsub();
+    } catch (_) {
+      // non-blocking
+    }
+  }, [courseIdState, studentClassIds, studentDocId]);
+
   function toggleCustomVideo(chapterId, url) {
     // If same chapter and same URL is open, close it; otherwise open it
     if (customVideoDay === chapterId && customVideoUrl === url) {
@@ -1019,21 +1120,9 @@ export default function CourseDetailsPage() {
           </p>
           <div className="mt-3 text-sm sm:text-base text-gray-800">
             {(() => {
-              const total = chapters.length || 0;
-              // Compute attendance: trainer overrides self; if no trainer record, use self status
-              let presentCount = 0;
-              chapters.forEach((ch) => {
-                const t = trainerAttendanceByChapter?.[ch.id];
-                if (t?.taken) {
-                  if (t.present) presentCount += 1;
-                } else if (presentChapterIds.has(ch.id)) {
-                  presentCount += 1;
-                }
-              });
-              const percent = total > 0 ? Math.round((presentCount / total) * 100) : 0;
               return (
                 <span className="inline-block px-3 py-1 rounded bg-white border">
-                  Attendance: <strong>{presentCount}/{total}</strong> ({percent}%)
+                  Attendance: <strong>{attPresentOfUnlocked}/{attUnlockedTotal}</strong> ({attPercent}%)
                 </span>
               );
             })()}
