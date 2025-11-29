@@ -710,12 +710,53 @@ useEffect(() => {
         <div>
           <h2 className="font-semibold">Internship Students</h2>
           <p className="text-sm text-slate-500">
-            Only admissions marked as internship appear here. Assign them to the selected internship.
+            Only admissions marked as internship appear here. Assign them to an internship without leaving this section.
           </p>
         </div>
         <div className="text-sm text-slate-500">
           <div>Eligible: {internshipStudents.length}</div>
           <div>Assigned: {assignedInternshipStudents.length}</div>
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <div className="space-y-2">
+          <label className="text-sm text-slate-600">Choose Internship</label>
+          <select
+            value={selectedInternshipId}
+            onChange={(e) => setSelectedInternshipId(e.target.value)}
+            className="w-full rounded-md border px-3 py-2"
+          >
+            {internships.length === 0 && (
+              <option value="">No internships available</option>
+            )}
+            {internships.map((internship) => (
+              <option key={internship.id} value={internship.id}>
+                {internship.name || internship.id}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm text-slate-600">Active Internship Details</label>
+          <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-600 min-h-[3.5rem]">
+            {selectedInternship ? (
+              <>
+                <div className="font-semibold text-slate-800">
+                  {selectedInternship.name || selectedInternship.id}
+                </div>
+                {selectedInternship.description && (
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                    {selectedInternship.description}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-amber-600 text-sm">
+                Select an internship to enable assignments.
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
