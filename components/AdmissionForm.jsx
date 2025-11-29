@@ -43,6 +43,7 @@ export default function AdmissionForm({ onStudentAdded }) {
     totalFee: "",
     payedFee: "",
     remarks: "",
+    isInternship: false,
   });
 
   const [lastRegdNo, setLastRegdNo] = useState("0");
@@ -272,6 +273,7 @@ export default function AdmissionForm({ onStudentAdded }) {
         workCompany: formData.workCompany,
         skillSet: formData.skillSet,
         remarks: formData.remarks,
+        isInternship: formData.isInternship,
       };
 
       const res = await makeAuthenticatedRequest("/api/create-student", {
@@ -321,6 +323,7 @@ export default function AdmissionForm({ onStudentAdded }) {
         totalFee: "",
         payedFee: "",
         remarks: "",
+        isInternship: false,
       });
       setOtp("");
       setOtpVerified(false);
@@ -343,10 +346,29 @@ export default function AdmissionForm({ onStudentAdded }) {
   return (
     <CheckAdminAuth>
       <div className="max-w-5xl mx-auto p-8 bg-white shadow-md rounded-md">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
           <h2 className="text-3xl font-bold text-blue-700">
             🎓 Admission Form
           </h2>
+          <div className="flex flex-col items-end gap-1 text-right">
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={formData.isInternship}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    isInternship: e.target.checked,
+                  }))
+                }
+                className="h-4 w-4 accent-emerald-600"
+              />
+              Internship Admission
+            </label>
+            <p className="text-xs text-slate-500">
+              Check to tag this student as an intern.
+            </p>
+          </div>
         </div>
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Personal Info */}
@@ -379,7 +401,16 @@ export default function AdmissionForm({ onStudentAdded }) {
                 />
               </div>
               <div>
-                <Label required>Student Name</Label>
+                <Label required>
+                  <span className="flex items-center gap-2">
+                    Student Name
+                    {formData.isInternship && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        Internship
+                      </span>
+                    )}
+                  </span>
+                </Label>
                 <input
                   type="text"
                   name="studentName"
