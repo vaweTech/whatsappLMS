@@ -274,6 +274,7 @@ export default function AdmissionForm({ onStudentAdded }) {
         skillSet: formData.skillSet,
         remarks: formData.remarks,
         isInternship: formData.isInternship,
+        role: formData.isInternship ? "internship" : "student",
       };
 
       const res = await makeAuthenticatedRequest("/api/create-student", {

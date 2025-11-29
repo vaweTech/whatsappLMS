@@ -222,6 +222,7 @@ async function createStudentHandler(req) {
     
     try {
       const phoneNormalized = normalizeToE164(body.phone || body.phone1);
+      const derivedRole = body.role || (body.isInternship ? "internship" : "student");
       
       const studentData = {
         ...body, // regdNo, fatherName, address, phones, education, fees, etc.
@@ -230,7 +231,7 @@ async function createStudentHandler(req) {
         name,
         classId,
         uid: studentUid,
-        role: "student",
+        role: derivedRole,
         // Store default password for admin visibility in Student Info (note: security trade-off as requested)
         password: DEFAULT_STUDENT_PASSWORD,
         // Store phone fields for UI/searching
