@@ -7,6 +7,100 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+let cachedServiceAccount = null;
+
+function loadServiceAccount() {
+  if (cachedServiceAccount) return cachedServiceAccount;
+
+  let serviceAccountJson = null;
+
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    try {
+      serviceAccountJson = Buffer.from(
+        process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
+        'base64'
+      ).toString('utf8');
+    } catch (error) {
+      console.warn('Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:', error?.message || error);
+    }
+  }
+
+  if (!serviceAccountJson && process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  }
+
+  if (!serviceAccountJson) {
+    try {
+      const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
+      serviceAccountJson = fs.readFileSync(serviceAccountPath, 'utf8');
+    } catch (error) {
+      throw new Error('Service account credentials are required for REST fallback. Provide FIREBASE_SERVICE_ACCOUNT_BASE64 or serviceAccountKey.json.');
+    }
+  }
+
+  cachedServiceAccount = JSON.parse(serviceAccountJson);
+  if (
+    cachedServiceAccount.private_key &&
+    cachedServiceAccount.private_key.includes('\\n')
+  ) {
+    cachedServiceAccount.private_key = cachedServiceAccount.private_key.replace(/\\n/g, '\n');
+  }
+  return cachedServiceAccount;
+}
+
+function encodeBase64Url(value) {
+  const jsonString = typeof value === 'string' ? value : JSON.stringify(value);
+  return Buffer.from(jsonString)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+/g, '');
+}
+
+async function getGoogleAccessToken(scopes = ['https://www.googleapis.com/auth/datastore']) {
+  const serviceAccount = loadServiceAccount();
+  const now = Math.floor(Date.now() / 1000);
+  const scopeString = Array.isArray(scopes) ? scopes.join(' ') : scopes;
+
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now,
+    scope: scopeString
+  };
+
+  const unsigned = `${encodeBase64Url(header)}.${encodeBase64Url(payload)}`;
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(unsigned);
+  const signature = sign
+    .sign(serviceAccount.private_key, 'base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+/g, '');
+  const assertion = `${unsigned}.${signature}`;
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${assertion}`
+  });
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    throw new Error(errText || 'Failed to fetch Google OAuth token');
+  }
+
+  const { access_token } = await tokenRes.json();
+  if (!access_token) {
+    throw new Error('OAuth token response missing access_token');
+  }
+
+  return { accessToken: access_token, serviceAccount };
+}
+
 // Input validation schema
 const createStudentSchema = z.object({
   email: z.string().email('Invalid email format'),
@@ -258,85 +352,19 @@ async function createStudentHandler(req) {
                                   writeErrorMsg.includes('1E08010C') ||
                                   firestoreWriteError.code === 'ERR_OSSL_UNSUPPORTED';
       
-      if (isWriteDecoderError && process.env.NODE_ENV === 'development') {
+      if (isWriteDecoderError) {
         console.error('❌ OpenSSL DECODER error during Firestore write. Attempting REST API fallback...');
         
-        // Try using Firestore REST API directly as a workaround
         try {
-          const phoneNormalized = normalizeToE164(body.phone || body.phone1);
-          const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'vawetechnology';
+          const { accessToken, serviceAccount } = await getGoogleAccessToken('https://www.googleapis.com/auth/datastore');
+          const projectId =
+            process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+            process.env.FIREBASE_PROJECT_ID ||
+            serviceAccount.project_id;
           
-          // Get access token for REST API using Node's built-in crypto
-          // For development, we'll try to use the service account directly
-          let serviceAccount;
-          try {
-            const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
-            const serviceAccountData = fs.readFileSync(serviceAccountPath, 'utf8');
-            serviceAccount = JSON.parse(serviceAccountData);
-          } catch (fileError) {
-            throw new Error('Could not read service account file: ' + fileError.message);
-          }
-          
-          // Create JWT using Node's built-in crypto
-          const now = Math.floor(Date.now() / 1000);
-          const jwtHeader = {
-            alg: 'RS256',
-            typ: 'JWT'
-          };
-          
-          const jwtPayload = {
-            iss: serviceAccount.client_email,
-            sub: serviceAccount.client_email,
-            aud: 'https://oauth2.googleapis.com/token',
-            exp: now + 3600,
-            iat: now,
-            scope: 'https://www.googleapis.com/auth/datastore'
-          };
-          
-          // Encode JWT
-          const encodeBase64Url = (obj) => {
-            return Buffer.from(JSON.stringify(obj))
-              .toString('base64')
-              .replace(/\+/g, '-')
-              .replace(/\//g, '_')
-              .replace(/=/g, '');
-          };
-          
-          const headerB64 = encodeBase64Url(jwtHeader);
-          const payloadB64 = encodeBase64Url(jwtPayload);
-          const unsignedToken = `${headerB64}.${payloadB64}`;
-          
-          // Sign with private key
-          const privateKey = serviceAccount.private_key.replace(/\\n/g, '\n');
-          const sign = crypto.createSign('RSA-SHA256');
-          sign.update(unsignedToken);
-          const signature = sign.sign(privateKey, 'base64')
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-          
-          const jwtToken = `${unsignedToken}.${signature}`;
-          
-          // Get access token
-          const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwtToken}`
-          });
-          
-          if (!tokenResponse.ok) {
-            const errorData = await tokenResponse.text();
-            throw new Error(`Failed to get access token: ${errorData}`);
-          }
-          
-          const { access_token } = await tokenResponse.json();
-          
-          if (!access_token) {
-            throw new Error('No access token received from OAuth2');
-          }
-          
-          // Prepare student data for REST API (convert Firestore types)
           const phoneNormalized2 = normalizeToE164(body.phone || body.phone1);
+          const derivedRoleRest = body.role || (body.isInternship ? "internship" : "student");
+          
           const studentDataRest = {
             fields: {
               regdNo: { stringValue: String(body.regdNo || '') },
@@ -345,7 +373,7 @@ async function createStudentHandler(req) {
               name: { stringValue: name },
               classId: { stringValue: classId || 'general' },
               uid: { stringValue: studentUid },
-              role: { stringValue: 'student' },
+              role: { stringValue: derivedRoleRest },
               password: { stringValue: DEFAULT_STUDENT_PASSWORD },
               phone1: { stringValue: body.phone1 || '' },
               phone: { stringValue: phoneNormalized2 || body.phone || body.phone1 || '' },
@@ -353,7 +381,8 @@ async function createStudentHandler(req) {
               reminderCount: { integerValue: '0' },
               createdAt: { timestampValue: new Date().toISOString() },
               createdBy: { stringValue: req.user.uid },
-              authUserCreated: { booleanValue: !!userRecord }
+              authUserCreated: { booleanValue: !!userRecord },
+              isInternship: { booleanValue: !!body.isInternship }
             }
           };
           
@@ -376,20 +405,27 @@ async function createStudentHandler(req) {
           if (body.totalFee) studentDataRest.fields.totalFee = { doubleValue: Number(body.totalFee) };
           if (body.PayedFee !== undefined) studentDataRest.fields.PayedFee = { doubleValue: Number(body.PayedFee) };
           if (body.remarks) studentDataRest.fields.remarks = { stringValue: String(body.remarks) };
+          if (body.classIds) studentDataRest.fields.classIds = {
+            arrayValue: {
+              values: Array.isArray(body.classIds)
+                ? body.classIds.map((id) => ({ stringValue: id }))
+                : []
+            }
+          };
           
           // Create document using REST API
           const restUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/students`;
           const restResponse = await fetch(restUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${access_token}`,
+              'Authorization': `Bearer ${accessToken}`,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify(studentDataRest)
           });
           
           if (!restResponse.ok) {
-            const errorData = await restResponse.json();
+            const errorData = await restResponse.json().catch(() => ({}));
             throw new Error(`REST API failed: ${JSON.stringify(errorData)}`);
           }
           
@@ -398,7 +434,6 @@ async function createStudentHandler(req) {
           console.log(`✅ Student created successfully via REST API fallback with UID: ${studentUid}, authUserCreated: ${!!userRecord}`);
         } catch (restApiError) {
           console.error('❌ REST API fallback also failed:', restApiError.message);
-          // Return error - both methods failed
           return new Response(
             JSON.stringify({ 
               error: "Failed to create student due to OpenSSL compatibility issue. Both Admin SDK and REST API methods failed. Please check your Firebase configuration or try again later.",
@@ -413,18 +448,6 @@ async function createStudentHandler(req) {
             { status: 500 }
           );
         }
-      } else if (isWriteDecoderError) {
-        // Production: Return error but indicate student may have been created
-        console.error('❌ OpenSSL DECODER error during Firestore write:', writeErrorMsg);
-        return new Response(
-          JSON.stringify({ 
-            error: "Failed to create student due to OpenSSL compatibility issue. Please check the student list - the record may have been created.",
-            details: "Firestore write operation failed due to DECODER error",
-            studentUid: studentUid,
-            authUserCreated: !!userRecord
-          }),
-          { status: 500 }
-        );
       } else {
         // Re-throw non-DECODER errors
         throw firestoreWriteError;
