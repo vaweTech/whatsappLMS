@@ -6,6 +6,127 @@ import crypto from 'crypto';
 import { withAdminAuth, withRateLimit, validateInput } from "@/lib/apiAuth";
 import { z } from 'zod';
 
+let cachedServiceAccount = null;
+
+function loadServiceAccount() {
+  if (cachedServiceAccount) return cachedServiceAccount;
+
+  let serviceAccountJson = null;
+
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    try {
+      serviceAccountJson = Buffer.from(
+        process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
+        'base64'
+      ).toString('utf8');
+    } catch (error) {
+      console.warn('Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:', error?.message || error);
+    }
+  }
+
+  if (!serviceAccountJson && process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  }
+
+  if (!serviceAccountJson) {
+    const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
+    serviceAccountJson = fs.readFileSync(serviceAccountPath, 'utf8');
+  }
+
+  cachedServiceAccount = JSON.parse(serviceAccountJson);
+  if (
+    cachedServiceAccount.private_key &&
+    cachedServiceAccount.private_key.includes('\\n')
+  ) {
+    cachedServiceAccount.private_key = cachedServiceAccount.private_key.replace(/\\n/g, '\n');
+  }
+  return cachedServiceAccount;
+}
+
+function encodeBase64Url(input) {
+  const value = typeof input === 'string' ? input : JSON.stringify(input);
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+/g, '');
+}
+
+async function getGoogleAccessToken(scopes = ['https://www.googleapis.com/auth/datastore']) {
+  const serviceAccount = loadServiceAccount();
+  const now = Math.floor(Date.now() / 1000);
+  const scopeString = Array.isArray(scopes) ? scopes.join(' ') : scopes;
+
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now,
+    scope: scopeString
+  };
+
+  const unsigned = `${encodeBase64Url(header)}.${encodeBase64Url(payload)}`;
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(unsigned);
+  const signature = sign
+    .sign(serviceAccount.private_key, 'base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+/g, '');
+  const assertion = `${unsigned}.${signature}`;
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${assertion}`
+  });
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    throw new Error(errText || 'Failed to fetch Google OAuth token');
+  }
+
+  const { access_token } = await tokenRes.json();
+  if (!access_token) {
+    throw new Error('OAuth token response missing access_token');
+  }
+
+  return { accessToken: access_token, serviceAccount };
+}
+
+async function deleteAuthUserViaRest(uid) {
+  try {
+    const { accessToken, serviceAccount } = await getGoogleAccessToken('https://www.googleapis.com/auth/identitytoolkit');
+    const projectId =
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+      process.env.FIREBASE_PROJECT_ID ||
+      serviceAccount.project_id;
+
+    const restUrl = `https://identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:delete`;
+    const restRes = await fetch(restUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ localId: uid })
+    });
+
+    if (!restRes.ok) {
+      const errText = await restRes.text();
+      throw new Error(errText || `REST delete failed for uid ${uid}`);
+    }
+
+    console.log('✅ Auth user deleted via REST API fallback:', uid);
+    return true;
+  } catch (error) {
+    console.error('❌ Auth REST delete fallback failed:', error?.message || error);
+    return false;
+  }
+}
+
 // Input validation schema
 const deleteStudentSchema = z.object({
   id: z.string().optional(),
@@ -78,7 +199,11 @@ async function deleteStudentHandler(request) {
         if (authErr?.code === "auth/user-not-found") {
           // Ignore if user is already gone
         } else if (isDecoderError) {
-          console.warn("⚠️ Skipping Auth user deletion due to OpenSSL DECODER error. Proceeding with Firestore delete.");
+          console.warn("⚠️ Auth user deletion hit OpenSSL DECODER error. Attempting REST fallback...");
+          const restDeleted = await deleteAuthUserViaRest(uid);
+          if (!restDeleted) {
+            throw new Error("Failed to delete Firebase Auth user due to OpenSSL compatibility issue. REST fallback also failed.");
+          }
         } else {
           console.warn("Failed to delete auth user:", authErr);
         }
@@ -113,43 +238,15 @@ async function deleteStudentHandler(request) {
         console.warn('❌ OpenSSL DECODER error during Firestore delete. Attempting REST API fallback...');
 
         try {
-          // Read service account
-          const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
-          const saJson = fs.readFileSync(serviceAccountPath, 'utf8');
-          const sa = JSON.parse(saJson);
-
-          // Build JWT
-          const now = Math.floor(Date.now() / 1000);
-          const header = { alg: 'RS256', typ: 'JWT' };
-          const payload = {
-            iss: sa.client_email,
-            sub: sa.client_email,
-            aud: 'https://oauth2.googleapis.com/token',
-            exp: now + 3600,
-            iat: now,
-            scope: 'https://www.googleapis.com/auth/datastore'
-          };
-          const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+/g,'');
-          const unsigned = `${b64url(header)}.${b64url(payload)}`;
-          const sign = crypto.createSign('RSA-SHA256');
-          sign.update(unsigned);
-          const signature = sign.sign(sa.private_key.replace(/\\n/g,'\n'),'base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+/g,'');
-          const assertion = `${unsigned}.${signature}`;
-
-          // Exchange for access token
-          const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${assertion}`
-          });
-          if (!tokenRes.ok) throw new Error(await tokenRes.text());
-          const { access_token } = await tokenRes.json();
-
-          const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || sa.project_id;
+          const { accessToken, serviceAccount } = await getGoogleAccessToken('https://www.googleapis.com/auth/datastore');
+          const projectId =
+            process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+            process.env.FIREBASE_PROJECT_ID ||
+            serviceAccount.project_id;
           const restUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/students/${docRef.id}`;
           const delRes = await fetch(restUrl, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${access_token}` }
+            headers: { Authorization: `Bearer ${accessToken}` }
           });
           if (!delRes.ok) throw new Error(await delRes.text());
           deletedViaRest = true;
