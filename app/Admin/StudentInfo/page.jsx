@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, deleteDoc, doc, updateDoc, getDoc, query, where } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, updateDoc, getDoc, query, where, writeBatch } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import CheckAdminAuth from "@/lib/CheckAdminAuth";
@@ -244,6 +244,24 @@ export default function StudentListPage() {
     setLoading(false);
   }
 
+  async function deleteStudentFirestoreOnly(studentId) {
+    try {
+      const studentDocRef = doc(db, "students", studentId);
+      const paymentsSnap = await getDocs(collection(studentDocRef, "payments"));
+      if (!paymentsSnap.empty) {
+        const batch = writeBatch(db);
+        paymentsSnap.forEach((paymentDoc) => batch.delete(paymentDoc.ref));
+        await batch.commit();
+      }
+      await deleteDoc(studentDocRef);
+      return true;
+    } catch (error) {
+      console.error("Fallback Firestore delete failed:", error);
+      alert(error?.message || "Failed to delete student via fallback.");
+      return false;
+    }
+  }
+
   async function handleDeleteStudent(id) {
     const confirmed = confirm(
       "Delete this student from the system? This will also remove their login access."
@@ -265,14 +283,27 @@ export default function StudentListPage() {
       alert("Student deleted successfully.");
     } catch (e) {
       console.error("Delete student failed:", e);
-      
-      // Check for DECODER error specifically
-      if (e.message?.includes('DECODER') || e.message?.includes('OpenSSL')) {
-        alert("Authentication error: OpenSSL compatibility issue detected. This is a known issue on Windows. Please try again or contact administrator if the problem persists.");
-      } else {
-        handleAuthError(e, handleAuthExpired);
-        alert(e.message || "Failed to delete student");
+      const message = String(e?.message || "");
+      const isDecoderError = /DECODER|OpenSSL|1E08010C/i.test(message);
+
+      if (isDecoderError) {
+        const proceedFallback = confirm(
+          "Server-side deletion failed due to the Windows OpenSSL compatibility issue.\n\nDo you want to delete the student record directly from Firestore? (Their login account may still exist in Firebase Auth.)"
+        );
+        if (proceedFallback) {
+          const removed = await deleteStudentFirestoreOnly(id);
+          if (removed) {
+            await fetchStudents();
+            alert("Student record deleted via fallback. Their login access may still exist and might need manual removal later.");
+          }
+        } else {
+          alert("Deletion cancelled. Please try again later.");
+        }
+        return;
       }
+
+      handleAuthError(e, handleAuthExpired);
+      alert(e.message || "Failed to delete student");
     }
   }
 
