@@ -48,6 +48,52 @@ export default function ManageInternshipCourses() {
     return () => unsub();
   }, []);
 
+  const fetchCourses = useCallback(async function fetchCourses() {
+    const snap = await firestoreHelpers.getDocs(
+      firestoreHelpers.collection(db, "internships", internshipId, "courses")
+    );
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setCourses(list);
+    if (!activeCourseId && list.length > 0) setActiveCourseId(list[0].id);
+  }, [internshipId, activeCourseId]);
+
+  const fetchCourseAndChapters = useCallback(
+    async function fetchCourseAndChapters(courseId) {
+      const [courseSnap, chapterSnap] = await Promise.all([
+        firestoreHelpers.getDoc(
+          firestoreHelpers.doc(db, "internships", internshipId, "courses", courseId)
+        ),
+        firestoreHelpers.getDocs(
+          firestoreHelpers.collection(
+            db,
+            "internships",
+            internshipId,
+            "courses",
+            courseId,
+            "chapters"
+          )
+        ),
+      ]);
+
+      if (courseSnap.exists()) {
+        const data = courseSnap.data();
+        setCourse({
+          id: courseSnap.id,
+          title: data.title || "",
+          description: data.description || "",
+          courseCode: data.courseCode || "",
+          syllabus: Array.isArray(data.syllabus) ? data.syllabus : [],
+          sourceCourseId: data.sourceCourseId || "",
+        });
+      }
+
+      const list = chapterSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setChapters(list);
+    },
+    [internshipId]
+  );
+
   useEffect(() => {
     if (!internshipId || !user) return;
     fetchCourses();
@@ -57,15 +103,6 @@ export default function ManageInternshipCourses() {
     if (!activeCourseId) return;
     fetchCourseAndChapters(activeCourseId);
   }, [activeCourseId, fetchCourseAndChapters]);
-
-  const fetchCourses = useCallback(async function fetchCourses() {
-    const snap = await firestoreHelpers.getDocs(
-      firestoreHelpers.collection(db, "internships", internshipId, "courses")
-    );
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    setCourses(list);
-    if (!activeCourseId && list.length > 0) setActiveCourseId(list[0].id);
-  }, [internshipId, activeCourseId]);
 
   async function fetchCourse(courseId) {
     const ref = firestoreHelpers.doc(
@@ -104,40 +141,6 @@ export default function ManageInternshipCourses() {
     list.sort((a, b) => (a.order || 0) - (b.order || 0));
     setChapters(list);
   }
-
-  const fetchCourseAndChapters = useCallback(async function fetchCourseAndChapters(courseId) {
-    const [courseSnap, chapterSnap] = await Promise.all([
-      firestoreHelpers.getDoc(
-        firestoreHelpers.doc(db, "internships", internshipId, "courses", courseId)
-      ),
-      firestoreHelpers.getDocs(
-        firestoreHelpers.collection(
-          db,
-          "internships",
-          internshipId,
-          "courses",
-          courseId,
-          "chapters"
-        )
-      ),
-    ]);
-
-    if (courseSnap.exists()) {
-      const data = courseSnap.data();
-      setCourse({
-        id: courseSnap.id,
-        title: data.title || "",
-        description: data.description || "",
-        courseCode: data.courseCode || "",
-        syllabus: Array.isArray(data.syllabus) ? data.syllabus : [],
-        sourceCourseId: data.sourceCourseId || "",
-      });
-    }
-
-    const list = chapterSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    list.sort((a, b) => (a.order || 0) - (b.order || 0));
-    setChapters(list);
-  }, [internshipId]);
 
   async function saveCourse(e) {
     e.preventDefault();

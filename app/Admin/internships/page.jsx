@@ -43,6 +43,25 @@ export default function InternshipManager() {
     return () => unsub();
   }, []);
 
+  const fetchInternships = useCallback(async function fetchInternships() {
+    const snap = await firestoreHelpers.getDocs(
+      firestoreHelpers.collection(db, "internships")
+    );
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setInternships(list);
+    if (!selectedInternshipId && list.length > 0) {
+      setSelectedInternshipId(list[0].id);
+    }
+  }, [selectedInternshipId]);
+
+  const fetchCourses = useCallback(async function fetchCourses() {
+    const snap = await firestoreHelpers.getDocs(
+      firestoreHelpers.collection(db, "courses")
+    );
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setCourses(list);
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     fetchInternships();
@@ -55,17 +74,6 @@ export default function InternshipManager() {
       return;
     }
     fetchInternshipCourses(selectedInternshipId);
-  }, [selectedInternshipId]);
-
-  const fetchInternships = useCallback(async function fetchInternships() {
-    const snap = await firestoreHelpers.getDocs(
-      firestoreHelpers.collection(db, "internships")
-    );
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    setInternships(list);
-    if (!selectedInternshipId && list.length > 0) {
-      setSelectedInternshipId(list[0].id);
-    }
   }, [selectedInternshipId]);
 
   async function deleteCourseFromInternship(courseId) {
@@ -116,14 +124,6 @@ export default function InternshipManager() {
     );
     setInternshipCourses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
   }
-
-  const fetchCourses = useCallback(async function fetchCourses() {
-    const snap = await firestoreHelpers.getDocs(
-      firestoreHelpers.collection(db, "courses")
-    );
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    setCourses(list);
-  }, []);
 
   async function createInternship(e) {
     e.preventDefault();
