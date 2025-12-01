@@ -244,6 +244,31 @@ export default function StudentListPage() {
     setLoading(false);
   }
 
+  // Helper to safely parse JSON responses
+  async function safeParseJsonResponse(res) {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) return { data: null, text: text || "" };
+      // Remove any BOM or leading whitespace
+      const cleanText = text.trim().replace(/^\uFEFF/, '');
+      // Try to find JSON object in the text (in case there's HTML before/after)
+      const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const data = JSON.parse(jsonMatch[0]);
+          return { data, text };
+        } catch (parseErr) {
+          // JSON match found but parsing failed
+          return { data: null, text };
+        }
+      }
+      return { data: null, text };
+    } catch (err) {
+      console.warn("Failed to read response:", err);
+      return { data: null, text: "" };
+    }
+  }
+
   async function deleteStudentFirestoreOnly(studentId) {
     try {
       const studentDocRef = doc(db, "students", studentId);
@@ -276,39 +301,29 @@ export default function StudentListPage() {
 
       // Check response status - treat 200-299 as success
       if (res.status >= 200 && res.status < 300) {
-        // Success - try to parse JSON, but don't fail if it's not JSON
-        try {
-          const contentType = res.headers.get("content-type") || "";
-          if (contentType.includes("application/json")) {
-            const data = await res.json();
-            // Check if there's an error in the success response
-            if (data.error) {
-              throw new Error(data.error);
-            }
-          }
-        } catch (parseErr) {
-          // If parsing fails but status is OK, assume success (deletion worked)
-          console.warn("Response parsing warning (but status was OK):", parseErr);
+        // Success - use safe parser to avoid JSON errors
+        const { data } = await safeParseJsonResponse(res);
+        if (data && data.error) {
+          throw new Error(data.error);
         }
+        // If parsing failed or no error field, assume success (status code is what matters)
         await fetchStudents();
         alert("Student deleted successfully.");
         return;
       }
 
-      // Handle error responses
+      // Handle error responses - use safe parser
       let errorMessage = `Failed to delete student (${res.status})`;
       try {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          const err = await res.json();
-          errorMessage = err.error || errorMessage;
-        } else {
-          // Try to get text, but limit length to avoid huge HTML pages
-          const text = await res.text();
-          errorMessage = text.substring(0, 200) || errorMessage;
+        const { data: errData, text } = await safeParseJsonResponse(res);
+        if (errData && errData.error) {
+          errorMessage = errData.error;
+        } else if (text && text.trim()) {
+          // Use raw text if JSON parsing failed
+          errorMessage = text.substring(0, 200);
         }
-      } catch (parseErr) {
-        console.warn("Failed to parse error response:", parseErr);
+      } catch (readErr) {
+        console.warn("Failed to read error response:", readErr);
         errorMessage = res.statusText || errorMessage;
       }
       throw new Error(errorMessage);
