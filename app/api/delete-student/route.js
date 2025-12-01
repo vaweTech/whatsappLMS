@@ -115,8 +115,14 @@ async function getGoogleAccessToken(scopes = ["https://www.googleapis.com/auth/d
   });
 
   if (!tokenRes.ok) {
-    const errText = await tokenRes.text();
-    throw new Error(errText || "Failed to fetch Google OAuth token");
+    let errText = "Failed to fetch Google OAuth token";
+    try {
+      const errData = await tokenRes.json().catch(() => null);
+      errText = errData?.error?.message || errData?.error_description || await tokenRes.text().catch(() => errText);
+    } catch {
+      // Fallback to default error
+    }
+    throw new Error(errText);
   }
 
   const { access_token } = await tokenRes.json();
@@ -198,7 +204,14 @@ async function fetchStudentDocViaRest(docId, client) {
   });
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error(await res.text());
+    let errMsg = `Firestore REST API error (${res.status})`;
+    try {
+      const errData = await res.json().catch(() => null);
+      errMsg = errData?.error?.message || errData?.error || await res.text().catch(() => errMsg);
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errMsg);
   }
   const doc = await res.json();
   return {
@@ -234,7 +247,14 @@ async function queryStudentDocViaRest(fieldPath, value, client) {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await res.text());
+    let errMsg = `Firestore query REST API error (${res.status})`;
+    try {
+      const errData = await res.json().catch(() => null);
+      errMsg = errData?.error?.message || errData?.error || await res.text().catch(() => errMsg);
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errMsg);
   }
   const rows = await res.json();
   const doc = rows.find((row) => row.document)?.document;
@@ -254,7 +274,14 @@ async function deletePaymentsViaRest(docId, client) {
   });
   if (res.status === 404) return;
   if (!res.ok) {
-    throw new Error(await res.text());
+    let errMsg = `Firestore REST API error (${res.status})`;
+    try {
+      const errData = await res.json().catch(() => null);
+      errMsg = errData?.error?.message || errData?.error || await res.text().catch(() => errMsg);
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errMsg);
   }
   const data = await res.json();
   const docs = data.documents || [];
@@ -277,7 +304,14 @@ async function deleteFirestoreDocViaRest(docId, client) {
   });
   if (res.status === 404) return;
   if (!res.ok) {
-    throw new Error(await res.text());
+    let errMsg = `Firestore delete REST API error (${res.status})`;
+    try {
+      const errData = await res.json().catch(() => null);
+      errMsg = errData?.error?.message || errData?.error || await res.text().catch(() => errMsg);
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errMsg);
   }
 }
 
@@ -294,7 +328,14 @@ async function deleteAuthUserViaRest(uid, client) {
     body: JSON.stringify({ localId: uid }),
   });
   if (!res.ok) {
-    throw new Error(await res.text());
+    let errMsg = `Identity Toolkit REST API error (${res.status})`;
+    try {
+      const errData = await res.json().catch(() => null);
+      errMsg = errData?.error?.message || errData?.error || await res.text().catch(() => errMsg);
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errMsg);
   }
 }
 
@@ -470,8 +511,10 @@ async function deleteStudentHandler(request) {
     );
   } catch (e) {
     console.error("Delete student error:", e);
+    // Ensure error message is safe for JSON
+    const errorMessage = String(e?.message || "Failed to delete student").replace(/[\x00-\x1F\x7F]/g, "");
     return new Response(
-      JSON.stringify({ error: e.message || "Failed to delete student" }),
+      JSON.stringify({ error: errorMessage }),
       {
         status: 500,
         headers: { "Content-Type": "application/json" },

@@ -296,14 +296,14 @@ export default function StudentListPage() {
             await fetchStudents();
             alert("Student record deleted via fallback. Their login access may still exist and might need manual removal later.");
           }
-        } else {
+      } else {
           alert("Deletion cancelled. Please try again later.");
         }
         return;
       }
 
-      handleAuthError(e, handleAuthExpired);
-      alert(e.message || "Failed to delete student");
+        handleAuthError(e, handleAuthExpired);
+        alert(e.message || "Failed to delete student");
     }
   }
 
