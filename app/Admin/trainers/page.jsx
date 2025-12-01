@@ -11,21 +11,25 @@ export default function ManageTrainersPage() {
   const [trainers, setTrainers] = useState([]);
   const [classes, setClasses] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [internships, setInternships] = useState([]);
   const [newTrainer, setNewTrainer] = useState({ name: "", email: "" });
   const [selectedTrainerId, setSelectedTrainerId] = useState("");
   const [trainerClasses, setTrainerClasses] = useState([]);
   const [trainerCourses, setTrainerCourses] = useState([]);
+  const [trainerInternships, setTrainerInternships] = useState([]);
 
   useEffect(() => {
     (async () => {
-      const [tSnap, cSnap, crSnap] = await Promise.all([
+      const [tSnap, cSnap, crSnap, iSnap] = await Promise.all([
         getDocs(collection(db, "users")),
         getDocs(collection(db, "classes")),
         getDocs(collection(db, "courses")),
+        getDocs(collection(db, "internships")),
       ]);
       setTrainers(tSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.role === "trainer"));
       setClasses(cSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setCourses(crSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setInternships(iSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
     })();
   }, []);
 
@@ -48,6 +52,7 @@ export default function ManageTrainersPage() {
     batch.update(doc(db, "users", selectedTrainerId), {
       trainerClasses,
       trainerCourses,
+      trainerInternships,
     });
     await batch.commit();
     // refresh trainers list to reflect changes
@@ -77,7 +82,24 @@ export default function ManageTrainersPage() {
 
         <div className="bg-white border rounded p-4 mb-6">
           <h2 className="font-semibold mb-2">Select Trainer</h2>
-          <select className="border p-2 rounded w-full" value={selectedTrainerId} onChange={(e) => setSelectedTrainerId(e.target.value)}>
+          <select
+            className="border p-2 rounded w-full"
+            value={selectedTrainerId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setSelectedTrainerId(id);
+              const t = trainers.find((tr) => tr.id === id);
+              if (t) {
+                setTrainerClasses(Array.isArray(t.trainerClasses) ? t.trainerClasses : []);
+                setTrainerCourses(Array.isArray(t.trainerCourses) ? t.trainerCourses : []);
+                setTrainerInternships(Array.isArray(t.trainerInternships) ? t.trainerInternships : []);
+              } else {
+                setTrainerClasses([]);
+                setTrainerCourses([]);
+                setTrainerInternships([]);
+              }
+            }}
+          >
             <option value="">Choose…</option>
             {trainers.map((t) => (
               <option key={t.id} value={t.id}>{t.name || t.email}</option>
@@ -114,6 +136,29 @@ export default function ManageTrainersPage() {
           </div>
         </div>
 
+        <div className="mt-4 bg-white border rounded p-4">
+          <h3 className="font-semibold mb-2">Grant Internship Access</h3>
+          <div className="space-y-2 max-h-60 overflow-auto border rounded p-2">
+            {internships.map((it) => (
+              <label key={it.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={trainerInternships.includes(it.id)}
+                  onChange={(e) => {
+                    setTrainerInternships((prev) =>
+                      e.target.checked ? [...prev, it.id] : prev.filter((id) => id !== it.id)
+                    );
+                  }}
+                />
+                <span>{it.name || it.id}</span>
+              </label>
+            ))}
+            {internships.length === 0 && (
+              <p className="text-sm text-gray-500">No internships available.</p>
+            )}
+          </div>
+        </div>
+
         <div className="mt-4">
           <button onClick={handleAssign} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded">Save Access</button>
         </div>
@@ -132,18 +177,24 @@ export default function ManageTrainersPage() {
                   <th className="p-2 border text-left">Password</th>
                   <th className="p-2 border text-left">Classes</th>
                   <th className="p-2 border text-left">Courses</th>
+                  <th className="p-2 border text-left">Internships</th>
                 </tr>
               </thead>
               <tbody>
                 {trainers.map((t) => {
                   const cls = Array.isArray(t.trainerClasses) ? t.trainerClasses : [];
                   const crs = Array.isArray(t.trainerCourses) ? t.trainerCourses : [];
+                  const ints = Array.isArray(t.trainerInternships) ? t.trainerInternships : [];
                   const classNames = cls
                     .map((id) => classes.find((c) => c.id === id)?.name)
                     .filter(Boolean)
                     .join(', ');
                   const courseNames = crs
                     .map((id) => courses.find((c) => c.id === id)?.title)
+                    .filter(Boolean)
+                    .join(', ');
+                  const internshipNames = ints
+                    .map((id) => internships.find((i) => i.id === id)?.name || id)
                     .filter(Boolean)
                     .join(', ');
                   return (
@@ -153,6 +204,7 @@ export default function ManageTrainersPage() {
                       <td className="p-2 border">{t.trainerPassword || '—'}</td>
                       <td className="p-2 border">{classNames || '-'}</td>
                       <td className="p-2 border">{courseNames || '-'}</td>
+                      <td className="p-2 border">{internshipNames || '-'}</td>
                     </tr>
                   );
                 })}

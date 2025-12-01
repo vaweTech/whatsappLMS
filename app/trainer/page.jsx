@@ -10,8 +10,22 @@ export default function TrainerHome() {
   const [userId, setUserId] = useState("");
   const [classes, setClasses] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [internships, setInternships] = useState([]);
   const [students, setStudents] = useState([]);
   const [allowedClasses, setAllowedClasses] = useState([]);
+  const [allowedInternships, setAllowedInternships] = useState([]);
+  const [selectedInternshipId, setSelectedInternshipId] = useState("");
+  const [internshipCourses, setInternshipCourses] = useState([]);
+  const [internshipChapters, setInternshipChapters] = useState([]);
+  const [selectedInternshipCourseForUnlock, setSelectedInternshipCourseForUnlock] = useState(null);
+  const [selectedInternshipChapters, setSelectedInternshipChapters] = useState([]);
+  const [showInternshipChapterModal, setShowInternshipChapterModal] = useState(false);
+  const [internshipStudents, setInternshipStudents] = useState([]);
+  const [showInternshipAttendanceModal, setShowInternshipAttendanceModal] = useState(false);
+  const [internshipAttendanceCourse, setInternshipAttendanceCourse] = useState(null);
+  const [internshipAttendanceChapterId, setInternshipAttendanceChapterId] = useState("");
+  const [internshipAttendanceSelectedIds, setInternshipAttendanceSelectedIds] = useState([]);
+  const [internshipAttendanceSaving, setInternshipAttendanceSaving] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [classCourses, setClassCourses] = useState([]);
   const [unlockStatus, setUnlockStatus] = useState("");
@@ -34,15 +48,18 @@ export default function TrainerHome() {
       const uSnap = await getDoc(doc(db, "users", u.uid));
       const data = uSnap.exists() ? uSnap.data() : {};
       setAllowedClasses(data.trainerClasses || []);
+      setAllowedInternships(data.trainerInternships || []);
       // Trainer-level course assignment not used for class view
 
-      const [cSnap, crSnap] = await Promise.all([
+      const [cSnap, crSnap, iSnap] = await Promise.all([
         getDocs(collection(db, "classes")),
         getDocs(collection(db, "courses")),
+        getDocs(collection(db, "internships")),
       ]);
       setClasses(cSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       const allCourses = crSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setCourses(allCourses);
+      setInternships(iSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
       // Load all students once for attendance
       try {
@@ -77,6 +94,84 @@ export default function TrainerHome() {
     }
     loadClassCourses();
   }, [selectedClassId, courses]);
+
+  // Load internship courses and students when an internship is selected
+  useEffect(() => {
+    async function loadInternshipData() {
+      if (!selectedInternshipId) {
+        setInternshipCourses([]);
+        setInternshipStudents([]);
+        setInternshipChapters([]);
+        return;
+      }
+      try {
+        const [cSnap, sSnap] = await Promise.all([
+          getDocs(collection(db, "internships", selectedInternshipId, "courses")),
+          getDocs(collection(db, "internships", selectedInternshipId, "students")),
+        ]);
+        setInternshipCourses(cSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setInternshipStudents(sSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (error) {
+        console.error("Error loading internship data:", error);
+        setInternshipCourses([]);
+        setInternshipStudents([]);
+      }
+    }
+    loadInternshipData();
+  }, [selectedInternshipId]);
+
+  // Load chapters for an internship course
+  const loadInternshipChapters = async (internshipId, courseId, preselectUnlocked = false) => {
+    if (!internshipId || !courseId) {
+      setInternshipChapters([]);
+      setSelectedInternshipChapters([]);
+      return;
+    }
+    try {
+      const snap = await getDocs(
+        collection(db, "internships", internshipId, "courses", courseId, "chapters")
+      );
+      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      items.sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+        if (a.order !== undefined) return -1;
+        if (b.order !== undefined) return 1;
+        return 0;
+      });
+      setInternshipChapters(items);
+      // Optionally preselect chapters that are already unlocked for internship students
+      if (preselectUnlocked && internshipStudents.length > 0) {
+        try {
+          // Take the first internship student and read their chapterAccess for this course
+          const first = internshipStudents.find(
+            (s) => typeof s.studentId === "string" && s.studentId.length > 0
+          );
+          if (first) {
+            const sSnap = await getDoc(doc(db, "students", first.studentId));
+            if (sSnap.exists()) {
+              const data = sSnap.data() || {};
+              const access = data.chapterAccess || {};
+              const unlocked = Array.isArray(access[courseId]) ? access[courseId] : [];
+              setSelectedInternshipChapters(unlocked);
+            } else {
+              setSelectedInternshipChapters([]);
+            }
+          } else {
+            setSelectedInternshipChapters([]);
+          }
+        } catch (e) {
+          console.error("Error preselecting internship unlocked chapters:", e);
+          setSelectedInternshipChapters([]);
+        }
+      } else {
+        setSelectedInternshipChapters([]);
+      }
+    } catch (error) {
+      console.error("Error loading internship chapters:", error);
+      setInternshipChapters([]);
+      setSelectedInternshipChapters([]);
+    }
+  };
 
   // Load chapters for a course
   const loadChapters = async (courseId) => {
@@ -273,8 +368,6 @@ export default function TrainerHome() {
   };
 
   // Handle class unlock
- 
-
   // Handle course unlock
   const handleCourseUnlock = async (course) => {
     if (!selectedClassId) {
@@ -378,6 +471,130 @@ export default function TrainerHome() {
     }
   };
 
+  // Internship: open chapter unlock modal for a course
+  const handleInternshipCourseUnlock = async (course) => {
+    if (!selectedInternshipId) {
+      setUnlockStatus("Please select an internship first.");
+      return;
+    }
+    setSelectedInternshipCourseForUnlock(course);
+    // Load chapters and preselect ones already unlocked for this internship course
+    await loadInternshipChapters(selectedInternshipId, course.id, true);
+    setShowInternshipChapterModal(true);
+  };
+
+  // Internship: unlock selected chapters for all students in this internship
+  const handleInternshipChapterUnlock = async () => {
+    if (!selectedInternshipId || !selectedInternshipCourseForUnlock) {
+      setUnlockStatus("Select an internship and course first.");
+      return;
+    }
+    if (selectedInternshipChapters.length === 0) {
+      setUnlockStatus("Select at least one chapter to unlock.");
+      return;
+    }
+    setUnlockLoading(true);
+    setUnlockStatus("");
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+        today.getDate()
+      ).padStart(2, "0")}`;
+
+      const studentIds = internshipStudents
+        .map((s) => s.studentId)
+        .filter((x) => typeof x === "string" && x.length > 0);
+
+      const updates = [];
+      for (const sid of studentIds) {
+        const sRef = doc(db, "students", sid);
+        for (const chId of selectedInternshipChapters) {
+          updates.push(
+            updateDoc(sRef, {
+              [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]: arrayUnion(chId),
+            })
+          );
+        }
+      }
+      if (updates.length > 0) {
+        await Promise.all(updates);
+      }
+
+      setUnlockStatus(
+        `Unlocked ${selectedInternshipChapters.length} chapters for internship students on ${ymd}.`
+      );
+      setShowInternshipChapterModal(false);
+      setSelectedInternshipChapters([]);
+      setSelectedInternshipCourseForUnlock(null);
+    } catch (error) {
+      console.error("Failed to unlock internship chapters:", error);
+      setUnlockStatus(error?.message || "Failed to unlock internship chapters.");
+    } finally {
+      setUnlockLoading(false);
+    }
+  };
+
+  // Internship: open attendance modal for a course
+  const openInternshipAttendanceForCourse = async (course) => {
+    if (!selectedInternshipId) {
+      setUnlockStatus("Please select an internship first.");
+      return;
+    }
+    setInternshipAttendanceCourse(course);
+    await loadInternshipChapters(selectedInternshipId, course.id);
+    setInternshipAttendanceChapterId("");
+    setInternshipAttendanceSelectedIds([]);
+    setShowInternshipAttendanceModal(true);
+  };
+
+  const toggleInternshipAttendanceStudent = (studentId) => {
+    setInternshipAttendanceSelectedIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const saveInternshipAttendance = async () => {
+    if (
+      !selectedInternshipId ||
+      !internshipAttendanceCourse ||
+      !internshipAttendanceChapterId
+    ) {
+      alert("Select internship, course and chapter first.");
+      return;
+    }
+    setInternshipAttendanceSaving(true);
+    try {
+      const today = new Date();
+      const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+        today.getDate()
+      ).padStart(2, "0")}`;
+      const key = `internship:${selectedInternshipId}|course:${internshipAttendanceCourse.id}|chapter:${internshipAttendanceChapterId}|${ymd}`;
+      const ref = doc(db, "attendance", key);
+      await setDoc(
+        ref,
+        {
+          type: "trainer_internship",
+          internshipId: selectedInternshipId,
+          courseId: internshipAttendanceCourse.id,
+          chapterId: internshipAttendanceChapterId,
+          date: ymd,
+          present: internshipAttendanceSelectedIds,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setShowInternshipAttendanceModal(false);
+      setInternshipAttendanceCourse(null);
+      setInternshipAttendanceChapterId("");
+      setInternshipAttendanceSelectedIds([]);
+      alert("Internship attendance saved.");
+    } catch (e) {
+      alert(e?.message || "Failed to save internship attendance");
+    } finally {
+      setInternshipAttendanceSaving(false);
+    }
+  };
+
   return (
     <CheckTrainerAuth>
       <div className="p-6 max-w-5xl mx-auto">
@@ -389,6 +606,8 @@ export default function TrainerHome() {
             {unlockStatus}
           </div>
         )}
+
+       
 
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-white border rounded p-4">
@@ -456,6 +675,68 @@ export default function TrainerHome() {
             )}
           </div>
         </div>
+        {allowedInternships.length > 0 && (
+          <div className="bg-white border rounded p-4 mb-4">
+            <h2 className="font-semibold mb-2">Your Internships</h2>
+            <ul className="space-y-1">
+              {allowedInternships.map((id) => {
+                const it = internships.find((x) => x.id === id);
+                const selected = id === selectedInternshipId;
+                return (
+                  <li
+                    key={id}
+                    className={`text-sm px-2 py-1 rounded cursor-pointer ${
+                      selected ? "bg-blue-50 border border-blue-300" : "hover:bg-gray-50 border border-transparent"
+                    }`}
+                    onClick={() => setSelectedInternshipId(id)}
+                  >
+                    <span className="font-medium">{it?.name || id}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {selectedInternshipId && (
+          <div className="mt-6 bg-white border rounded p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-semibold">Internship Courses</h2>
+              <span className="text-xs text-gray-500">
+                {internshipCourses.length} course(s) in{" "}
+                {internships.find((i) => i.id === selectedInternshipId)?.name || selectedInternshipId}
+              </span>
+            </div>
+            {internshipCourses.length === 0 ? (
+              <p className="text-sm text-gray-500">No courses copied into this internship yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {internshipCourses.map((cr) => (
+                  <li
+                    key={cr.id}
+                    className="flex items-center justify-between border rounded p-2"
+                  >
+                    <span>{cr.title || cr.id}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded"
+                        onClick={() => handleInternshipCourseUnlock(cr)}
+                        disabled={unlockLoading}
+                      >
+                        {unlockLoading ? "Unlocking..." : "Unlock Daywise"}
+                      </button>
+                      <button
+                        className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded"
+                        onClick={() => openInternshipAttendanceForCourse(cr)}
+                      >
+                        Take Attendance
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* Chapter Selection Modal */}
         {showChapterModal && selectedCourseForUnlock && (
@@ -668,6 +949,250 @@ export default function TrainerHome() {
                   }`}
                 >
                   {attendanceSaving ? 'Saving...' : `Save Attendance (${attendanceSelectedIds.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Internship Chapter Selection Modal */}
+        {showInternshipChapterModal && selectedInternshipCourseForUnlock && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+              <h2 className="text-xl font-bold mb-4">
+                Select Chapters for Internship Course{" "}
+                {selectedInternshipCourseForUnlock.title || selectedInternshipCourseForUnlock.id}
+              </h2>
+
+              {internshipChapters.length > 0 ? (
+                <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                  <div className="flex items-center gap-3 mb-2">
+                    <button
+                      onClick={() =>
+                        setSelectedInternshipChapters(internshipChapters.map((c) => c.id))
+                      }
+                      className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      onClick={() => setSelectedInternshipChapters([])}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                  {internshipChapters.map((ch) => (
+                    <label
+                      key={ch.id}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedInternshipChapters.includes(ch.id)}
+                        onChange={(e) => {
+                          setSelectedInternshipChapters((prev) =>
+                            e.target.checked
+                              ? [...prev, ch.id]
+                              : prev.filter((id) => id !== ch.id)
+                          );
+                        }}
+                        className="rounded"
+                      />
+                      <span className="flex-1">
+                        {typeof ch.order === "number" ? `Day ${ch.order}: ` : ""}
+                        {ch.title || ch.id}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 mb-4">No chapters found for this internship course.</p>
+              )}
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowInternshipChapterModal(false);
+                    setSelectedInternshipChapters([]);
+                    setSelectedInternshipCourseForUnlock(null);
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleInternshipChapterUnlock}
+                  disabled={unlockLoading || selectedInternshipChapters.length === 0}
+                  className={`px-4 py-2 rounded text-white ${
+                    unlockLoading || selectedInternshipChapters.length === 0
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {unlockLoading
+                    ? "Unlocking..."
+                    : `Unlock ${selectedInternshipChapters.length} Chapter${
+                        selectedInternshipChapters.length !== 1 ? "s" : ""
+                      } for Internship`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Internship Attendance Modal */}
+        {showInternshipAttendanceModal && internshipAttendanceCourse && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-3xl mx-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">
+                  Internship Attendance — {internshipAttendanceCourse.title || internshipAttendanceCourse.id}
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowInternshipAttendanceModal(false);
+                    setInternshipAttendanceCourse(null);
+                    setInternshipAttendanceChapterId("");
+                    setInternshipAttendanceSelectedIds([]);
+                  }}
+                  className="text-gray-600 hover:text-gray-800"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="text-xs text-gray-600 mb-3">
+                Today:{" "}
+                {(() => {
+                  const d = new Date();
+                  const y = d.getFullYear();
+                  const m = String(d.getMonth() + 1).padStart(2, "0");
+                  const day = String(d.getDate()).padStart(2, "0");
+                  return `${y}-${m}-${day}`;
+                })()}
+              </div>
+
+              {/* Select Chapter */}
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Select Chapter (Day)
+                </label>
+                <select
+                  value={internshipAttendanceChapterId}
+                  onChange={(e) => setInternshipAttendanceChapterId(e.target.value)}
+                  className="border rounded px-3 py-2 w-full"
+                >
+                  <option value="">Select chapter...</option>
+                  {internshipChapters.map((ch, idx) => (
+                    <option key={ch.id} value={ch.id}>
+                      Day {typeof ch.order === "number" ? ch.order : idx + 1}:{" "}
+                      {ch.title || ch.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Students list */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold">Students in this internship</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="text-sm bg-gray-200 px-3 py-1 rounded"
+                      onClick={() =>
+                        setInternshipAttendanceSelectedIds(
+                          internshipStudents
+                            .map((s) => s.studentId)
+                            .filter((x) => typeof x === "string" && x.length > 0)
+                        )
+                      }
+                    >
+                      Select All
+                    </button>
+                    <button
+                      className="text-sm bg-gray-200 px-3 py-1 rounded"
+                      onClick={() => setInternshipAttendanceSelectedIds([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-60 overflow-auto border rounded">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="p-2 text-left">Present</th>
+                        <th className="p-2 text-left">Name</th>
+                        <th className="p-2 text-left">Regd</th>
+                        <th className="p-2 text-left">Email</th>
+                        <th className="p-2 text-left">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {internshipStudents.map((s) => {
+                        const sid = s.studentId;
+                        return (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">
+                              <input
+                                type="checkbox"
+                                checked={internshipAttendanceSelectedIds.includes(sid)}
+                                onChange={() => toggleInternshipAttendanceStudent(sid)}
+                              />
+                            </td>
+                            <td className="p-2">{s.studentName || "-"}</td>
+                            <td className="p-2">{s.regdNo || "-"}</td>
+                            <td className="p-2">{s.email || "-"}</td>
+                            <td className="p-2">{s.phone || "-"}</td>
+                          </tr>
+                        );
+                      })}
+                      {internshipStudents.length === 0 && (
+                        <tr>
+                          <td
+                            className="p-2 text-gray-500 text-sm"
+                            colSpan={5}
+                          >
+                            No students assigned to this internship.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowInternshipAttendanceModal(false);
+                    setInternshipAttendanceCourse(null);
+                    setInternshipAttendanceChapterId("");
+                    setInternshipAttendanceSelectedIds([]);
+                  }}
+                  className="px-4 py-2 border rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveInternshipAttendance}
+                  disabled={
+                    internshipAttendanceSaving ||
+                    !internshipAttendanceChapterId ||
+                    internshipAttendanceSelectedIds.length === 0
+                  }
+                  className={`px-4 py-2 rounded text-white ${
+                    internshipAttendanceSaving ||
+                    !internshipAttendanceChapterId ||
+                    internshipAttendanceSelectedIds.length === 0
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-indigo-600 hover:bg-indigo-700"
+                  }`}
+                >
+                  {internshipAttendanceSaving
+                    ? "Saving..."
+                    : `Save Attendance (${internshipAttendanceSelectedIds.length})`}
                 </button>
               </div>
             </div>

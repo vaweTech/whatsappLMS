@@ -11,6 +11,7 @@ import {
   getDocs,
   orderBy,
   query,
+  where,
 } from "firebase/firestore";
 import { BookOpen, ArrowLeft, Play, FileText, Radio } from "lucide-react";
 import { createCourseUrl } from "../../../../../lib/urlUtils";
@@ -59,6 +60,7 @@ export default function InternshipCoursePage() {
   const [activeVideoUrl, setActiveVideoUrl] = useState("");
   const [activeVideoTitle, setActiveVideoTitle] = useState("");
   const [activeChapterId, setActiveChapterId] = useState(null);
+  const [accessibleChapters, setAccessibleChapters] = useState([]);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => {
@@ -126,6 +128,41 @@ export default function InternshipCoursePage() {
     }
     fetchData();
   }, [internshipId, courseId]);
+
+  // Load which chapters are unlocked for this user (internship course access)
+  useEffect(() => {
+    async function loadAccess() {
+      if (!user || !courseId) return;
+      try {
+        // Try direct student document first
+        let studentDoc = await getDoc(doc(db, "students", user.uid));
+        if (!studentDoc.exists()) {
+          const q = query(
+            collection(db, "students"),
+            where("uid", "==", user.uid)
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            studentDoc = snap.docs[0];
+          }
+        }
+        if (studentDoc && studentDoc.exists()) {
+          const data = studentDoc.data() || {};
+          const chapterAccess = data.chapterAccess || {};
+          const unlocked = Array.isArray(chapterAccess[courseId])
+            ? chapterAccess[courseId]
+            : [];
+          setAccessibleChapters(unlocked);
+        } else {
+          setAccessibleChapters([]);
+        }
+      } catch (e) {
+        console.error("Failed to load internship chapter access:", e);
+        setAccessibleChapters([]);
+      }
+    }
+    loadAccess();
+  }, [user, courseId]);
 
   if (loadingUser || loading) {
     return (
@@ -199,17 +236,25 @@ export default function InternshipCoursePage() {
                 const dayTests = progressTests.filter(
                   (t) => typeof t.day === "number" && t.day === dayNumber
                 );
+              const hasAccess = accessibleChapters.includes(ch.id);
 
                 return (
                 <div
                   key={ch.id}
-                  className="border border-gray-200 rounded-lg p-3 sm:p-4 flex flex-col gap-2"
+                  className={`border rounded-lg p-3 sm:p-4 flex flex-col gap-2 ${
+                    hasAccess ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50 opacity-80"
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm sm:text-base font-semibold text-gray-900">
                         {ch.title || "Untitled Chapter"}
                       </h3>
+                      {!hasAccess && (
+                        <p className="mt-0.5 text-[11px] font-medium text-red-600">
+                          Locked – wait for your trainer to unlock this day.
+                        </p>
+                      )}
                       {ch.topics && (
                         <p className="mt-1 text-xs sm:text-sm text-gray-600">
                           {ch.topics}
@@ -225,7 +270,7 @@ export default function InternshipCoursePage() {
 
                   <div className="flex flex-wrap gap-2 mt-1">
                     {/* Topic / chapter video (inline player under this chapter) */}
-                    {ch.video && (
+                    {hasAccess && ch.video && (
                       <button
                         type="button"
                         onClick={() => {
@@ -255,7 +300,7 @@ export default function InternshipCoursePage() {
                     )}
 
                       {/* PPT from dedicated PPT URL (Google Slides) */}
-                      {ch.pptUrl && (
+                      {hasAccess && ch.pptUrl && (
                         <button
                           type="button"
                           onClick={() => {
@@ -274,7 +319,7 @@ export default function InternshipCoursePage() {
                     )}
 
                       {/* PDF from Google Drive URL (secure PDF viewer) */}
-                    {ch.pdfDocument && (
+                    {hasAccess && ch.pdfDocument && (
                         <button
                           type="button"
                           onClick={() => {
@@ -293,7 +338,7 @@ export default function InternshipCoursePage() {
                     )}
 
                       {/* Live class link (Zoom / Meet) */}
-                      {ch.liveClassLink && (
+                      {hasAccess && ch.liveClassLink && (
                       <a
                           href={ch.liveClassLink}
                         target="_blank"
@@ -306,7 +351,7 @@ export default function InternshipCoursePage() {
                     )}
 
                       {/* Recorded class video (inline player under this chapter) */}
-                      {ch.recordedClassLink && (
+                      {hasAccess && ch.recordedClassLink && (
                         <button
                           type="button"
                           onClick={() => {
@@ -336,7 +381,7 @@ export default function InternshipCoursePage() {
                       )}
 
                       {/* Extra docs / class slides – open via secure PPT viewer */}
-                      {ch.classDocs && (
+                      {hasAccess && ch.classDocs && (
                         <button
                           type="button"
                           onClick={() => {
@@ -356,7 +401,7 @@ export default function InternshipCoursePage() {
                   </div>
 
                   {/* Inline video player directly under this chapter */}
-                  {activeVideoUrl && activeChapterId === ch.id && (
+                  {hasAccess && activeVideoUrl && activeChapterId === ch.id && (
                     <div className="mt-3 w-full">
                       <h4 className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">
                         {activeVideoTitle}
@@ -374,7 +419,7 @@ export default function InternshipCoursePage() {
                   )}
                   
                   {/* Day-wise progress tests for this chapter */}
-                  {dayTests.length > 0 && (
+                  {hasAccess && dayTests.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {dayTests.map((test) => (
                         <button

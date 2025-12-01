@@ -449,12 +449,18 @@ export default function DashboardPage() {
             const parentCollection = docSnap.ref.parent; // "students" (subcollection)
             const internshipDoc = parentCollection.parent; // internships/{internshipId}
             const internshipsCollection = internshipDoc?.parent; // "internships" collection
-            if (internshipsCollection && internshipsCollection.id === "internships") {
+            if (
+              internshipsCollection &&
+              internshipsCollection.id === "internships"
+            ) {
               assignedIds.add(internshipDoc.id);
             }
           });
         } catch (e) {
-          console.warn("Failed to resolve assigned internships; falling back to all:", e);
+          console.warn(
+            "Failed to resolve assigned internships via collectionGroup:",
+            e
+          );
         }
 
         if (cancelled) return;

@@ -189,7 +189,7 @@ export default function ManageInternshipCourses() {
       }
     }
     fetchProgressTests();
-  }, [course?.id, course?.sourceCourseId]);
+  }, [course]);
 
   async function saveCourse(e) {
     e.preventDefault();
@@ -1085,9 +1085,9 @@ export default function ManageInternshipCourses() {
                                                             setQuestionDrafts(next);
                                                           }}
                                                         />
-                                                      </div>
-                                                    ))}
-                                                  </div>
+                    </div>
+                  ))}
+                </div>
                                                 )}
 
                                                 {/* Coding editor */}
