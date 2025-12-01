@@ -114,7 +114,6 @@ export default function ManageMCQs() {
     if (uploadCourse) {
       loadChapters(uploadCourse);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadCourse]);
 
   // Auth check

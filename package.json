@@ -6,7 +6,7 @@
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider next dev",
     "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider next build && cross-env NODE_OPTIONS=--openssl-legacy-provider next-sitemap",
     "start": "cross-env NODE_OPTIONS=--openssl-legacy-provider next start",
-    "lint": "next lint",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0",
     "postbuild": "cross-env NODE_OPTIONS=--openssl-legacy-provider next-sitemap"
   },
   "dependencies": {
@@ -30,6 +30,7 @@
     "zod": "^4.1.9"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
     "@tailwindcss/postcss": "^4",
     "eslint": "^9.34.0",
     "eslint-config-next": "15.4.6",
