@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { auth, db } from "../../lib/firebase";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { doc, getDoc, collection, getDocs, query, where, orderBy, addDoc, updateDoc, deleteDoc, serverTimestamp, documentId } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, query, where, orderBy, addDoc, updateDoc, deleteDoc, serverTimestamp, documentId, onSnapshot } from "firebase/firestore";
 import { 
   User, 
   BookOpen, 
@@ -54,6 +54,15 @@ export default function DashboardPage() {
   const [phone, setPhone] = useState("");
   const [courseName, setCourseName] = useState("");
     const [courseProgress, setCourseProgress] = useState({});
+
+  // Internship-specific state (for students tagged as internship)
+  const [isInternshipStudent, setIsInternshipStudent] = useState(false);
+  const [internships, setInternships] = useState([]);
+  const [selectedInternship, setSelectedInternship] = useState(null);
+  const [internshipCourses, setInternshipCourses] = useState([]);
+  const [internshipCourseCounts, setInternshipCourseCounts] = useState({});
+  const [loadingInternships, setLoadingInternships] = useState(false);
+  const [loadingInternshipCourses, setLoadingInternshipCourses] = useState(false);
 
   // Admin Analytics Data
   const [analyticsData, setAnalyticsData] = useState({
@@ -155,6 +164,9 @@ export default function DashboardPage() {
         setStudentDocId(docRefSnap.id);
         setDisplayName(studentData.name || u.email);
 
+        // Mark internship students so we can show internships instead of programs
+        setIsInternshipStudent(!!studentData.isInternship);
+
         const titles = Array.isArray(studentData.coursesTitle)
           ? studentData.coursesTitle
           : studentData.coursesTitle
@@ -176,6 +188,7 @@ export default function DashboardPage() {
         setDisplayName(u.email);
         setCourseTitles([]);
         setStudentDocId(null);
+        setIsInternshipStudent(false);
         setTotalFee(0);
         setPaidFee(0);
         setPayAmount("");
@@ -291,8 +304,15 @@ export default function DashboardPage() {
     }
   };
 
-  // Fetch Programs (visible to all roles)
+  // Fetch Programs (visible to all non-internship roles)
   useEffect(() => {
+    // Internship students will see internships instead of programs
+    if (isInternshipStudent) {
+      setPrograms([]);
+      setSelectedProgram(null);
+      return;
+    }
+
     async function fetchPrograms() {
       try {
         setLoadingPrograms(true);
@@ -317,7 +337,7 @@ export default function DashboardPage() {
     }
     fetchPrograms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, eligibleCourseIds]);
+  }, [role, eligibleCourseIds, isInternshipStudent]);
 
   // Build eligibleCourseIds for current user based on chapterAccess and enrolled course titles
   useEffect(() => {
@@ -398,6 +418,179 @@ export default function DashboardPage() {
 
     // Otherwise, not relevant
     return false;
+  }
+
+  // Load internships list for internship students (live updates, only assigned internships)
+  useEffect(() => {
+    if (!isInternshipStudent || !user?.email) {
+      setInternships([]);
+      setSelectedInternship(null);
+      setInternshipCourses([]);
+      return;
+    }
+
+    let unsubInternships = null;
+    let cancelled = false;
+
+    async function setupInternshipsListener() {
+      try {
+        setLoadingInternships(true);
+
+        // Find internships where this student is assigned (internships/{id}/students collection)
+        const assignedIds = new Set();
+        try {
+          const studentsGroupRef = collectionGroup(db, "students");
+          const qAssigned = query(
+            studentsGroupRef,
+            where("email", "==", user.email)
+          );
+          const snapAssigned = await getDocs(qAssigned);
+          snapAssigned.forEach((docSnap) => {
+            const parentCollection = docSnap.ref.parent; // "students" (subcollection)
+            const internshipDoc = parentCollection.parent; // internships/{internshipId}
+            const internshipsCollection = internshipDoc?.parent; // "internships" collection
+            if (internshipsCollection && internshipsCollection.id === "internships") {
+              assignedIds.add(internshipDoc.id);
+            }
+          });
+        } catch (e) {
+          console.warn("Failed to resolve assigned internships; falling back to all:", e);
+        }
+
+        if (cancelled) return;
+
+        const colRef = collection(db, "internships");
+        unsubInternships = onSnapshot(
+          colRef,
+          async (snap) => {
+            let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+            // If we have assignedIds, filter to only those internships
+            if (assignedIds.size > 0) {
+              list = list.filter((i) => assignedIds.has(i.id));
+            }
+
+            setInternships(list);
+
+            // Compute total courses per internship for the card view
+            try {
+              const counts = {};
+              await Promise.all(
+                list.map(async (internship) => {
+                  try {
+                    const coursesSnap = await getDocs(
+                      collection(db, "internships", internship.id, "courses")
+                    );
+                    counts[internship.id] = coursesSnap.size;
+                  } catch {
+                    counts[internship.id] = 0;
+                  }
+                })
+              );
+              setInternshipCourseCounts(counts);
+            } catch {
+              // ignore count errors; UI will just omit counts
+            }
+
+            setLoadingInternships(false);
+          },
+          (error) => {
+            console.error("Failed to load internships:", error);
+            setLoadingInternships(false);
+          }
+        );
+      } catch (e) {
+        console.error("Error setting up internships listener:", e);
+        setLoadingInternships(false);
+      }
+    }
+
+    setupInternshipsListener();
+
+    return () => {
+      cancelled = true;
+      if (unsubInternships) unsubInternships();
+    };
+  }, [isInternshipStudent, user?.email]);
+
+  // Whenever an internship is selected for an internship student, load its courses
+  useEffect(() => {
+    if (!isInternshipStudent || !selectedInternship) return;
+    loadCoursesForInternship(selectedInternship);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInternshipStudent, selectedInternship, studentDocId]);
+
+  // Load courses for a selected internship (from `internships/{id}/courses`) with live updates
+  async function loadCoursesForInternship(internship) {
+    if (!internship) return;
+    setLoadingInternshipCourses(true);
+    setInternshipCourses([]);
+
+    const coursesRef = collection(db, "internships", internship.id, "courses");
+    const unsubscribe = onSnapshot(
+      coursesRef,
+      async (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        // Enrich with progress based on chapters under internship path and student chapterAccess
+        if (studentDocId && list.length > 0) {
+          try {
+            const studentRef = doc(db, "students", studentDocId);
+            const studentSnap = await getDoc(studentRef);
+            const studentData = studentSnap.exists() ? studentSnap.data() : {};
+            const chapterAccess = studentData.chapterAccess || {};
+
+            const withProgress = await Promise.all(
+              list.map(async (course) => {
+                try {
+                  const chaptersRef = collection(
+                    db,
+                    "internships",
+                    internship.id,
+                    "courses",
+                    course.id,
+                    "chapters"
+                  );
+                  const chaptersSnap = await getDocs(chaptersRef);
+                  const totalChapters = chaptersSnap.size;
+                  const openedChapters = Array.isArray(chapterAccess[course.id])
+                    ? chapterAccess[course.id].length
+                    : 0;
+                  const percentage =
+                    totalChapters > 0
+                      ? Math.round((openedChapters / totalChapters) * 100)
+                      : 0;
+                  return {
+                    ...course,
+                    _progress: { totalChapters, openedChapters, percentage },
+                  };
+                } catch {
+                  return {
+                    ...course,
+                    _progress: { totalChapters: 0, openedChapters: 0, percentage: 0 },
+                  };
+                }
+              })
+            );
+            setInternshipCourses(withProgress);
+          } catch {
+            setInternshipCourses(list);
+          }
+        } else {
+          setInternshipCourses(list);
+        }
+
+        setLoadingInternshipCourses(false);
+      },
+      (error) => {
+        console.error("Failed to load internship courses:", error);
+        setInternshipCourses([]);
+        setLoadingInternshipCourses(false);
+      }
+    );
+
+    // Note: caller must ensure to clean up if needed; here we rely on re-calling when internship changes
+    return unsubscribe;
   }
 
   // Load courses for a selected program
@@ -2092,82 +2285,328 @@ export default function DashboardPage() {
 
         {/* Your Courses Section removed; Programs act as primary grouping */}
 
-        {/* Programs Section - visible to all users */}
-        <div className="mt-8 sm:mt-12 mb-10">
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <div className="flex items-center gap-3">
-              <h2 className="text-xl sm:text-2xl font-bold">{selectedProgram ? 'Courses' : 'Programs'}</h2>
-              {selectedProgram && (
-                <button
-                  onClick={() => { setSelectedProgram(null); setProgramCourses([]); }}
-                  className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
-                >
-                  ← Back to Programs
-                </button>
-              )}
-            </div>
-            <button
-              onClick={async () => {
-                try {
-                  setLoadingPrograms(true);
-                  const programsRef = collection(db, "programs");
-                  let snap;
+        {/* Programs / Internships Section */}
+          <div className="mt-8 sm:mt-12 mb-10">
+          {isInternshipStudent ? (
+            <>
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl sm:text-2xl font-bold">
+                    {selectedInternship ? "Internship Courses" : "Internships"}
+                  </h2>
+                  {selectedInternship && (
+                    <button
+                      onClick={() => {
+                        setSelectedInternship(null);
+                        setInternshipCourses([]);
+                      }}
+                      className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                    >
+                      ← Back to Internships
+                    </button>
+                  )}
+                </div>
+              <button
+                onClick={async () => {
                   try {
-                    const programsQuery = query(programsRef, orderBy("createdAt", "desc"));
-                    snap = await getDocs(programsQuery);
-                  } catch (_) {
-                    snap = await getDocs(programsRef);
+                    setLoadingInternships(true);
+                      const snap = await getDocs(collection(db, "internships"));
+                      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                      setInternships(list);
+                  } catch (e) {
+                    alert("Failed to refresh internships");
+                  } finally {
+                    setLoadingInternships(false);
                   }
-                  const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                  const filtered = list.filter(p => programIsRelevantToUser(p));
-                  setPrograms(filtered);
-                } catch (e) {
-                  alert('Failed to refresh programs');
-                } finally {
-                  setLoadingPrograms(false);
-                }
-              }}
-              disabled={loadingPrograms}
-              className="px-3 py-2 text-sm bg-[#00448a] text-white rounded-lg hover:bg-[#003a76] disabled:opacity-50"
-            >
-              {loadingPrograms ? 'Refreshing...' : 'Refresh'}
-            </button>
-          </div>
+                }}
+                disabled={loadingInternships}
+                className="px-3 py-2 text-sm bg-[#00448a] text-white rounded-lg hover:bg-[#003a76] disabled:opacity-50"
+              >
+                {loadingInternships ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
 
-          {
-            loadingPrograms ? (
-              <div className="text-center py-12 text-gray-600">Loading programs...</div>
+            {loadingInternships ? (
+                <div className="text-center py-12 text-gray-600">
+                  Loading internships...
+                </div>
+              ) : selectedInternship ? (
+                <div>
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600">Internship:</p>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {selectedInternship.name || selectedInternship.id}
+                    </h3>
+                    {selectedInternship.description && (
+                      <p className="text-xs text-gray-600 mt-1">
+                        {selectedInternship.description}
+                      </p>
+                    )}
+                  </div>
+                  {loadingInternshipCourses ? (
+                    <div className="text-center py-12 text-gray-600">
+                      Loading courses...
+                    </div>
+                  ) : internshipCourses && internshipCourses.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                      {internshipCourses.map((c) => {
+                        const title = c.title || c.name || "Untitled Course";
+                        const fee = c.fee ?? c.price;
+                        const duration = c.duration || c.weeks || c.months || "";
+                        const progress =
+                          c._progress || {
+                            totalChapters: 0,
+                            openedChapters: 0,
+                            percentage: 0,
+                          };
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              router.push(
+                                `/internships/${selectedInternship.id}/courses/${c.id}`
+                              )
+                            }
+                            className="w-full text-left bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-4"
+                  >
+                    <h4 className="text-base font-semibold text-gray-900 line-clamp-2">
+                              {title}
+                    </h4>
+
+                            {/* Progress */}
+                            <div className="mt-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[11px] font-semibold text-gray-600">
+                                  Progress
+                                </span>
+                                <span className="text-[11px] font-bold text-emerald-600">
+                                  {progress.openedChapters} / {progress.totalChapters}
+                                </span>
+                              </div>
+                              <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+                                <div
+                                  className="h-2.5 bg-emerald-500"
+                                  style={{
+                                    width: `${Math.min(100, progress.percentage)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-3">
+                              <div className="text-xs text-gray-600">
+                                {duration ? (
+                                  <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                    Duration: {duration}
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                    Course
+                                  </span>
+                    )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {typeof fee !== "undefined" && (
+                                  <span className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                                    ₹{Number(fee).toLocaleString()}
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-[#00448a] font-semibold">
+                                  Open →
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <BookOpen className="w-8 h-8 text-gray-300" />
+                      </div>
+                      <p className="font-medium">
+                        No courses linked to this internship
+                      </p>
+                    </div>
+                  )}
+                  </div>
+              ) : internships && internships.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                  {internships.map((i) => {
+                    const title = i.name || i.id || "Untitled Internship";
+                    const start = i.startDate || i.createdAt;
+                    const startStr = start
+                      ? (start.toDate ? start.toDate() : new Date(start)).toLocaleDateString(
+                          "en-IN",
+                          { day: "2-digit", month: "short", year: "numeric" }
+                        )
+                      : "";
+                    const count =
+                      typeof internshipCourseCounts[i.id] === "number"
+                        ? internshipCourseCounts[i.id]
+                        : null;
+                    return (
+                      <button
+                        key={i.id}
+                        onClick={() => {
+                          setSelectedInternship(i);
+                        }}
+                        className="group text-left bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-0 w-full overflow-hidden hover:border-indigo-100"
+                      >
+                        {/* Top banner */}
+                        <div className="bg-gradient-to-r from-[#00448a] to-[#f56c53] p-3 text-white">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-base sm:text-lg font-semibold line-clamp-2">
+                                {title}
+                              </h3>
+                              {startStr && (
+                                <p className="text-[11px] sm:text-xs text-white/80 mt-0.5">
+                                  Created: {startStr}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                              Internship
+                            </span>
+                            {count !== null && (
+                              <span className="text-[11px] px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {count} {count === 1 ? "course" : "courses"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-3 text-xs text-[#00448a] group-hover:opacity-80 flex items-center justify-between">
+                            <span>Total courses to be covered</span>
+                            <span>View Courses →</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <BookOpen className="w-8 h-8 text-gray-300" />
+                </div>
+                  <p className="font-medium">No internships found</p>
+                <p className="text-xs mt-1">
+                    Internships will appear here when assigned
+                </p>
+              </div>
+            )}
+            </>
+        ) : (
+            <>
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl sm:text-2xl font-bold">
+                  {selectedProgram ? "Courses" : "Programs"}
+                </h2>
+                {selectedProgram && (
+                  <button
+                    onClick={() => {
+                      setSelectedProgram(null);
+                      setProgramCourses([]);
+                    }}
+                    className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                  >
+                    ← Back to Programs
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    setLoadingPrograms(true);
+                    const programsRef = collection(db, "programs");
+                    let snap;
+                    try {
+                      const programsQuery = query(
+                        programsRef,
+                        orderBy("createdAt", "desc")
+                      );
+                      snap = await getDocs(programsQuery);
+                    } catch (_) {
+                      snap = await getDocs(programsRef);
+                    }
+                      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                      const filtered = list.filter((p) => programIsRelevantToUser(p));
+                    setPrograms(filtered);
+                  } catch (e) {
+                    alert("Failed to refresh programs");
+                  } finally {
+                    setLoadingPrograms(false);
+                  }
+                }}
+                disabled={loadingPrograms}
+                className="px-3 py-2 text-sm bg-[#00448a] text-white rounded-lg hover:bg-[#003a76] disabled:opacity-50"
+              >
+                {loadingPrograms ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            {loadingPrograms ? (
+              <div className="text-center py-12 text-gray-600">
+                Loading programs...
+              </div>
             ) : selectedProgram ? (
               <div>
                 <div className="mb-4">
                   <p className="text-sm text-gray-600">Program:</p>
-                  <h3 className="text-lg font-semibold text-gray-900">{selectedProgram.title || selectedProgram.name || 'Program'}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {selectedProgram.title || selectedProgram.name || "Program"}
+                  </h3>
                 </div>
                 {loadingProgramCourses ? (
-                  <div className="text-center py-12 text-gray-600">Loading courses...</div>
+                  <div className="text-center py-12 text-gray-600">
+                    Loading courses...
+                  </div>
                 ) : programCourses && programCourses.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                     {programCourses.map((c) => {
-                      const title = c.title || c.name || 'Untitled Course';
-                      const description = c.description || c.summary || '';
+                      const title = c.title || c.name || "Untitled Course";
                       const fee = c.fee ?? c.price;
-                      const duration = c.duration || c.weeks || c.months || '';
-                      const progress = c._progress || { totalChapters: 0, openedChapters: 0, percentage: 0 };
+                        const duration = c.duration || c.weeks || c.months || "";
+                        const progress =
+                          c._progress || {
+                        totalChapters: 0,
+                        openedChapters: 0,
+                        percentage: 0,
+                      };
                       return (
-                        <div key={c.id} className="bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-4">
-                          <h4 className="text-base font-semibold text-gray-900 line-clamp-2">{title}</h4>
-                          {/* {description && <p className="text-sm text-gray-700 mt-2 line-clamp-3">{description}</p>} */}
+                        <div
+                          key={c.id}
+                          className="bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-4"
+                        >
+                          <h4 className="text-base font-semibold text-gray-900 line-clamp-2">
+                            {title}
+                          </h4>
 
-                          {/* Progress */}
+                            {/* Progress */}
                           <div className="mt-3">
                             <div className="flex items-center justify-between mb-1">
-                              <span className="text-[11px] font-semibold text-gray-600">Progress</span>
-                              <span className="text-[11px] font-bold text-emerald-600">{progress.openedChapters} / {progress.totalChapters}</span>
+                              <span className="text-[11px] font-semibold text-gray-600">
+                                Progress
+                              </span>
+                              <span className="text-[11px] font-bold text-emerald-600">
+                                  {progress.openedChapters} / {progress.totalChapters}
+                              </span>
                             </div>
                             <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
                               <div
                                 className="h-2.5 bg-emerald-500"
-                                style={{ width: `${Math.min(100, progress.percentage)}%` }}
+                                style={{
+                                    width: `${Math.min(100, progress.percentage)}%`,
+                                }}
                               />
                             </div>
                           </div>
@@ -2175,17 +2614,25 @@ export default function DashboardPage() {
                           <div className="flex items-center justify-between mt-3">
                             <div className="text-xs text-gray-600">
                               {duration ? (
-                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">Duration: {duration}</span>
+                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                  Duration: {duration}
+                                </span>
                               ) : (
-                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">Course</span>
+                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                  Course
+                                </span>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
-                              {typeof fee !== 'undefined' && (
-                                <span className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">₹{Number(fee).toLocaleString()}</span>
+                              {typeof fee !== "undefined" && (
+                                <span className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                                  ₹{Number(fee).toLocaleString()}
+                                </span>
                               )}
                               <button
-                                onClick={() => router.push(`/courses/${createCourseUrl(title)}`)}
+                                onClick={() =>
+                                    router.push(`/courses/${createCourseUrl(title)}`)
+                                }
                                 className="text-xs px-3 py-1.5 bg-[#00448a] text-white rounded hover:bg-[#003a76]"
                               >
                                 Open
@@ -2201,75 +2648,96 @@ export default function DashboardPage() {
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <BookOpen className="w-8 h-8 text-gray-300" />
                     </div>
-                    <p className="font-medium">No courses linked to this program</p>
-                    <p className="text-xs mt-1">Ask admin to link courses with this program</p>
+                      <p className="font-medium">No courses linked to this program</p>
+                    <p className="text-xs mt-1">
+                      Ask admin to link courses with this program
+                    </p>
                   </div>
                 )}
               </div>
-            ) : (
-              programs && programs.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-                  {programs.map((p) => {
-                    const title = p.title || p.name || 'Untitled Program';
-                    const description = p.description || p.summary || '';
-                    const fee = p.fee ?? p.price;
-                    const duration = p.duration || p.weeks || p.months || '';
-                    const start = p.startDate || p.start || p.createdAt;
-                    const startStr = start
-                      ? (start.toDate ? start.toDate() : new Date(start)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                      : '';
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => { setSelectedProgram(p); loadCoursesForProgram(p); }}
-                        className="group text-left bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-0 w-full overflow-hidden hover:border-indigo-100"
-                      >
-                        {/* Top banner */}
-                        <div className="bg-gradient-to-r from-[#00448a] to-[#f56c53] p-3 text-white">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <h3 className="text-base sm:text-lg font-semibold line-clamp-2">{title}</h3>
-                              {startStr && (
-                                <p className="text-[11px] sm:text-xs text-white/80 mt-0.5">Starts: {startStr}</p>
-                              )}
-                            </div>
-                            {typeof fee !== 'undefined' && (
-                              <span className="text-[10px] sm:text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10 whitespace-nowrap">₹{Number(fee).toLocaleString()}</span>
+            ) : programs && programs.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                {programs.map((p) => {
+                  const title = p.title || p.name || "Untitled Program";
+                  const description = p.description || p.summary || "";
+                  const fee = p.fee ?? p.price;
+                  const duration = p.duration || p.weeks || p.months || "";
+                  const start = p.startDate || p.start || p.createdAt;
+                  const startStr = start
+                      ? (start.toDate ? start.toDate() : new Date(start)).toLocaleDateString(
+                          "en-IN",
+                          { day: "2-digit", month: "short", year: "numeric" }
+                        )
+                    : "";
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setSelectedProgram(p);
+                        loadCoursesForProgram(p);
+                      }}
+                      className="group text-left bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all p-0 w-full overflow-hidden hover:border-indigo-100"
+                    >
+                      {/* Top banner */}
+                      <div className="bg-gradient-to-r from-[#00448a] to-[#f56c53] p-3 text-white">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-base sm:text-lg font-semibold line-clamp-2">
+                              {title}
+                            </h3>
+                            {startStr && (
+                              <p className="text-[11px] sm:text-xs text-white/80 mt-0.5">
+                                Starts: {startStr}
+                              </p>
                             )}
                           </div>
-                        </div>
-
-                        {/* Body */}
-                        <div className="p-4">
-                          {description && (
-                            <p className="text-sm text-gray-700 line-clamp-3">{description}</p>
+                          {typeof fee !== "undefined" && (
+                            <span className="text-[10px] sm:text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10 whitespace-nowrap">
+                              ₹{Number(fee).toLocaleString()}
+                            </span>
                           )}
-                          <div className="flex items-center justify-between mt-4">
-                            <div className="text-xs text-gray-600">
-                              {duration ? (
-                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">Duration: {duration}</span>
-                              ) : (
-                                <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">Program</span>
-                              )}
-                            </div>
-                            <span className="text-xs text-[#00448a] group-hover:opacity-80">View Courses →</span>
-                          </div>
                         </div>
-                      </button>
-                    );
-                  })}
+                      </div>
+
+                      {/* Body */}
+                      <div className="p-4">
+                        {description && (
+                          <p className="text-sm text-gray-700 line-clamp-3">
+                            {description}
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between mt-4">
+                          <div className="text-xs text-gray-600">
+                            {duration ? (
+                              <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                Duration: {duration}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 rounded bg-gray-50 border text-gray-700">
+                                Program
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-[#00448a] group-hover:opacity-80">
+                            View Courses →
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <BookOpen className="w-8 h-8 text-gray-300" />
                 </div>
-              ) : (
-                <div className="text-center py-12 text-gray-500">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <BookOpen className="w-8 h-8 text-gray-300" />
-                  </div>
-                  <p className="font-medium">No programs found</p>
-                  <p className="text-xs mt-1">Programs will appear here when added</p>
-                </div>
-              )
-            )
-          }
+                <p className="font-medium">No programs found</p>
+                <p className="text-xs mt-1">Programs will appear here when added</p>
+              </div>
+            )}
+            </>
+        )}
         </div>
 
         {/* Pay Fee (Razorpay only) - hidden for admin/superadmin */}
