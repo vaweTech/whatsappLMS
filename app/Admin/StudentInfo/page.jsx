@@ -274,13 +274,44 @@ export default function StudentListPage() {
         body: JSON.stringify({ id }),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to delete student");
+      // Check response status - treat 200-299 as success
+      if (res.status >= 200 && res.status < 300) {
+        // Success - try to parse JSON, but don't fail if it's not JSON
+        try {
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await res.json();
+            // Check if there's an error in the success response
+            if (data.error) {
+              throw new Error(data.error);
+            }
+          }
+        } catch (parseErr) {
+          // If parsing fails but status is OK, assume success (deletion worked)
+          console.warn("Response parsing warning (but status was OK):", parseErr);
+        }
+        await fetchStudents();
+        alert("Student deleted successfully.");
+        return;
       }
 
-      await fetchStudents();
-      alert("Student deleted successfully.");
+      // Handle error responses
+      let errorMessage = `Failed to delete student (${res.status})`;
+      try {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const err = await res.json();
+          errorMessage = err.error || errorMessage;
+        } else {
+          // Try to get text, but limit length to avoid huge HTML pages
+          const text = await res.text();
+          errorMessage = text.substring(0, 200) || errorMessage;
+        }
+      } catch (parseErr) {
+        console.warn("Failed to parse error response:", parseErr);
+        errorMessage = res.statusText || errorMessage;
+      }
+      throw new Error(errorMessage);
     } catch (e) {
       console.error("Delete student failed:", e);
       const message = String(e?.message || "");
@@ -296,14 +327,14 @@ export default function StudentListPage() {
             await fetchStudents();
             alert("Student record deleted via fallback. Their login access may still exist and might need manual removal later.");
           }
-      } else {
+        } else {
           alert("Deletion cancelled. Please try again later.");
         }
         return;
       }
 
-        handleAuthError(e, handleAuthExpired);
-        alert(e.message || "Failed to delete student");
+      handleAuthError(e, handleAuthExpired);
+      alert(e.message || "Failed to delete student");
     }
   }
 
