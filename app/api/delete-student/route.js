@@ -47,13 +47,19 @@ function loadServiceAccount() {
     try {
       serviceAccountJson = fs.readFileSync(serviceAccountPath, "utf8");
     } catch (error) {
+      const safeMsg = String(error?.message || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 200);
       throw new Error(
-        "Service account credentials are required. Provide FIREBASE_SERVICE_ACCOUNT_BASE64 or serviceAccountKey.json."
+        `Service account credentials are required. Provide FIREBASE_SERVICE_ACCOUNT_BASE64 or serviceAccountKey.json. ${safeMsg ? `(${safeMsg})` : ""}`
       );
     }
   }
 
-  cachedServiceAccount = JSON.parse(serviceAccountJson);
+  try {
+    cachedServiceAccount = JSON.parse(serviceAccountJson);
+  } catch (parseErr) {
+    const safeMsg = String(parseErr?.message || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 200);
+    throw new Error(`Failed to parse service account JSON: ${safeMsg}`);
+  }
   if (
     cachedServiceAccount.private_key &&
     cachedServiceAccount.private_key.includes("\\n")
@@ -117,15 +123,33 @@ async function getGoogleAccessToken(scopes = ["https://www.googleapis.com/auth/d
   if (!tokenRes.ok) {
     let errText = "Failed to fetch Google OAuth token";
     try {
-      const errData = await tokenRes.json().catch(() => null);
-      errText = errData?.error?.message || errData?.error_description || await tokenRes.text().catch(() => errText);
+      const contentType = tokenRes.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const errData = await tokenRes.json().catch(() => null);
+        errText = errData?.error?.message || errData?.error_description || errText;
+      } else {
+        const text = await tokenRes.text().catch(() => "");
+        errText = text.substring(0, 200) || errText;
+      }
     } catch {
       // Fallback to default error
     }
+    // Sanitize error message for JSON
+    errText = String(errText || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 500);
     throw new Error(errText);
   }
 
-  const { access_token } = await tokenRes.json();
+  let tokenData;
+  try {
+    tokenData = await tokenRes.json();
+  } catch (jsonErr) {
+    // If JSON parsing fails, try text
+    const text = await tokenRes.text().catch(() => "");
+    const safeText = String(text || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 200);
+    throw new Error(`Invalid OAuth token response: ${safeText}`);
+  }
+  
+  const { access_token } = tokenData || {};
   if (!access_token) {
     throw new Error("OAuth token response missing access_token");
   }
@@ -525,9 +549,36 @@ async function deleteStudentHandler(request) {
 
 // Apply security middleware: Admin auth + Rate limiting + Input validation
 export async function POST(request) {
-  return await withAdminAuth(request, (req1) =>
-    withRateLimit(30, 15 * 60 * 1000)(req1, (req2) =>
-      validateInput(deleteStudentSchema)(req2, deleteStudentHandler)
-    )
-  );
+  try {
+    const response = await withAdminAuth(request, (req1) =>
+      withRateLimit(30, 15 * 60 * 1000)(req1, (req2) =>
+        validateInput(deleteStudentSchema)(req2, deleteStudentHandler)
+      )
+    );
+    
+    // Ensure response is always valid JSON
+    if (response instanceof Response) {
+      return response;
+    }
+    
+    // If middleware returned something unexpected, wrap it
+    return new Response(
+      JSON.stringify({ error: "Unexpected response format" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (error) {
+    // Catch any unhandled errors from middleware chain
+    console.error("Unhandled error in delete-student route:", error);
+    const errorMessage = String(error?.message || "Internal server error").replace(/[\x00-\x1F\x7F]/g, "");
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
 }
