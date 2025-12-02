@@ -99,6 +99,7 @@
     const [reviewFlags, setReviewFlags] = useState({});
     const [timeLeftMs, setTimeLeftMs] = useState(null);
   const [editorDark, setEditorDark] = useState(false);
+  const [internshipRole, setInternshipRole] = useState(null); // Store internship role info: { internshipId, courseId }
 
     const scrollToQuestion = useCallback((index) => {
       setActiveQuestion(index);
@@ -249,7 +250,13 @@
 
         const studentData = studentDataResult;
         const userRole = userRoleResult;
+        const studentRole = studentData?.role;
         const isSuperAdmin = userRole === "superadmin";
+        // Treat as internship role if either users.role or students.role says "internship"
+        const isInternshipRole =
+          userRole === "internship" ||
+          studentRole === "internship" ||
+          studentData?.isInternship === true;
 
         // Parallel fetch of assignment and existing submission
         const [assignmentSnap, submissionQuerySnap] = await Promise.all([
@@ -272,7 +279,11 @@
         if (isSuperAdmin) {
           setHasAccess(true);
         } 
-        // Check if user has access to the chapter corresponding to the assignment day
+        // Internship students (role from users or students) can always access without unlocks
+        else if (isInternshipRole) {
+          setHasAccess(true);
+        }
+        // Regular students: Check if user has access to the chapter corresponding to the assignment day
         else if (studentData?.chapterAccess && studentData.chapterAccess[foundCourseId]) {
           const allowedChapters = studentData.chapterAccess[foundCourseId];
           const assignmentDay = assignmentData.day || 1;

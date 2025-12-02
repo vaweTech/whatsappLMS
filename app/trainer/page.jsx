@@ -541,8 +541,8 @@ export default function TrainerHome() {
           }
         }
 
-        // Update student chapterAccess when unlocking chapters
-        if (unlockInternshipStudents && studentIds.length > 0) {
+        // Update student chapterAccess when unlocking chapters (persist unlock for students)
+        if (studentIds.length > 0) {
           const updates = [];
           for (const sid of studentIds) {
             const sRef = doc(db, "students", sid);
@@ -587,11 +587,26 @@ export default function TrainerHome() {
             internshipId: selectedInternshipId,
             courseId: selectedInternshipCourseForUnlock.id, 
             date: ymd, 
-            chapters: [],
             createdAt: serverTimestamp() 
           }, { merge: true });
         }
-        setUnlockStatus(`Saved empty unlock record for internship${unlockInternshipStudents ? ' and students' : ''} on ${ymd}.`);
+        // Clear all chapterAccess for this internship course for all internship students (lock all)
+        if (studentIds.length > 0) {
+          const updates = [];
+          for (const sid of studentIds) {
+            const sRef = doc(db, "students", sid);
+            // Reset the chapterAccess for this internship course to an empty array (locked)
+            updates.push(
+              updateDoc(sRef, {
+                [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]: []
+              })
+            );
+          }
+          if (updates.length > 0) {
+            await Promise.all(updates);
+          }
+        }
+        setUnlockStatus(`All chapters locked for this internship course on ${ymd}.`);
       }
       setShowInternshipChapterModal(false);
       setSelectedInternshipChapters([]);
