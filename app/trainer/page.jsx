@@ -35,6 +35,7 @@ export default function TrainerHome() {
   const [chapters, setChapters] = useState([]);
   const [selectedChapters, setSelectedChapters] = useState([]);
   const [unlockStudents, setUnlockStudents] = useState(false);
+  const [unlockInternshipStudents, setUnlockInternshipStudents] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [attendanceCourse, setAttendanceCourse] = useState(null);
   const [attendanceChapterId, setAttendanceChapterId] = useState("");
@@ -489,10 +490,6 @@ export default function TrainerHome() {
       setUnlockStatus("Select an internship and course first.");
       return;
     }
-    if (selectedInternshipChapters.length === 0) {
-      setUnlockStatus("Select at least one chapter to unlock.");
-      return;
-    }
     setUnlockLoading(true);
     setUnlockStatus("");
     try {
@@ -505,24 +502,97 @@ export default function TrainerHome() {
         .map((s) => s.studentId)
         .filter((x) => typeof x === "string" && x.length > 0);
 
-      const updates = [];
-      for (const sid of studentIds) {
-        const sRef = doc(db, "students", sid);
-        for (const chId of selectedInternshipChapters) {
-          updates.push(
-            updateDoc(sRef, {
-              [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]: arrayUnion(chId),
-            })
-          );
-        }
-      }
-      if (updates.length > 0) {
-        await Promise.all(updates);
-      }
+      const internshipKey = `internship:${selectedInternshipId}`;
+      const courseKey = `course:${selectedInternshipCourseForUnlock.id}`;
+      const trainerKey = userId ? `trainer:${userId}` : null;
 
-      setUnlockStatus(
-        `Unlocked ${selectedInternshipChapters.length} chapters for internship students on ${ymd}.`
-      );
+      if (selectedInternshipChapters.length > 0) {
+        // Unlock specific chapters for internship, course and trainer
+        for (const chId of selectedInternshipChapters) {
+          if (unlockInternshipStudents && internshipKey) {
+            const ref = doc(db, "unlocks", `${internshipKey}|chapter:${chId}|${ymd}`);
+            await setDoc(ref, { 
+              key: internshipKey, 
+              internshipId: selectedInternshipId,
+              chapterId: chId, 
+              date: ymd, 
+              createdAt: serverTimestamp() 
+            }, { merge: true });
+          }
+          if (unlockInternshipStudents && courseKey) {
+            const ref = doc(db, "unlocks", `${courseKey}|chapter:${chId}|${ymd}`);
+            await setDoc(ref, { 
+              key: courseKey, 
+              chapterId: chId, 
+              date: ymd, 
+              createdAt: serverTimestamp() 
+            }, { merge: true });
+          }
+          if (trainerKey) {
+            const ref = doc(db, "unlocks", `${trainerKey}|internship:${selectedInternshipId}|course:${selectedInternshipCourseForUnlock.id}|chapter:${chId}|${ymd}`);
+            await setDoc(ref, { 
+              key: trainerKey, 
+              internshipId: selectedInternshipId,
+              courseId: selectedInternshipCourseForUnlock.id,
+              chapterId: chId, 
+              date: ymd, 
+              createdAt: serverTimestamp() 
+            }, { merge: true });
+          }
+        }
+
+        // Update student chapterAccess when unlocking chapters
+        if (unlockInternshipStudents && studentIds.length > 0) {
+          const updates = [];
+          for (const sid of studentIds) {
+            const sRef = doc(db, "students", sid);
+            for (const chId of selectedInternshipChapters) {
+              updates.push(
+                updateDoc(sRef, {
+                  [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]: arrayUnion(chId),
+                })
+              );
+            }
+          }
+          if (updates.length > 0) {
+            await Promise.all(updates);
+          }
+        }
+        setUnlockStatus(
+          `Unlocked ${selectedInternshipChapters.length} chapters for internship${unlockInternshipStudents ? ' and students' : ''} on ${ymd}.`
+        );
+      } else {
+        // Save empty unlock record for internship, course and trainer
+        if (unlockInternshipStudents && internshipKey) {
+          const ref = doc(db, "unlocks", `${internshipKey}|${ymd}`);
+          await setDoc(ref, { 
+            key: internshipKey, 
+            internshipId: selectedInternshipId,
+            date: ymd, 
+            createdAt: serverTimestamp() 
+          }, { merge: true });
+        }
+        if (unlockInternshipStudents && courseKey) {
+          const ref = doc(db, "unlocks", `${courseKey}|${ymd}`);
+          await setDoc(ref, { 
+            key: courseKey, 
+            date: ymd, 
+            createdAt: serverTimestamp() 
+          }, { merge: true });
+        }
+        if (trainerKey) {
+          const ref = doc(db, "unlocks", `${trainerKey}|internship:${selectedInternshipId}|course:${selectedInternshipCourseForUnlock.id}|${ymd}`);
+          await setDoc(ref, { 
+            key: trainerKey, 
+            internshipId: selectedInternshipId,
+            courseId: selectedInternshipCourseForUnlock.id, 
+            date: ymd, 
+            chapters: [],
+            createdAt: serverTimestamp() 
+          }, { merge: true });
+        }
+        setUnlockStatus(`Saved empty unlock record for internship${unlockInternshipStudents ? ' and students' : ''} on ${ymd}.`);
+      }
       setShowInternshipChapterModal(false);
       setSelectedInternshipChapters([]);
       setSelectedInternshipCourseForUnlock(null);
@@ -701,10 +771,21 @@ export default function TrainerHome() {
           <div className="mt-6 bg-white border rounded p-4">
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold">Internship Courses</h2>
-              <span className="text-xs text-gray-500">
-                {internshipCourses.length} course(s) in{" "}
-                {internships.find((i) => i.id === selectedInternshipId)?.name || selectedInternshipId}
-              </span>
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-gray-500">
+                  {internshipCourses.length} course(s) in{" "}
+                  {internships.find((i) => i.id === selectedInternshipId)?.name || selectedInternshipId}
+                </span>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={unlockInternshipStudents}
+                    onChange={(e) => setUnlockInternshipStudents(e.target.checked)}
+                    className="rounded"
+                  />
+                  Also unlock for students
+                </label>
+              </div>
             </div>
             {internshipCourses.length === 0 ? (
               <p className="text-sm text-gray-500">No courses copied into this internship yet.</p>
@@ -797,14 +878,18 @@ export default function TrainerHome() {
                 </button>
                 <button
                   onClick={handleChapterUnlock}
-                  disabled={unlockLoading || selectedChapters.length === 0}
+                  disabled={unlockLoading}
                   className={`px-4 py-2 rounded text-white ${
-                    unlockLoading || selectedChapters.length === 0
+                    unlockLoading
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-emerald-600 hover:bg-emerald-700'
                   }`}
                 >
-                  {unlockLoading ? 'Unlocking...' : `Unlock ${selectedChapters.length} Chapter${selectedChapters.length !== 1 ? 's' : ''}`}
+                  {unlockLoading 
+                    ? 'Saving...' 
+                    : selectedChapters.length > 0
+                    ? `Unlock ${selectedChapters.length} Chapter${selectedChapters.length !== 1 ? 's' : ''}`
+                    : 'Save Empty Unlock'}
                 </button>
               </div>
             </div>
@@ -1023,18 +1108,20 @@ export default function TrainerHome() {
                 </button>
                 <button
                   onClick={handleInternshipChapterUnlock}
-                  disabled={unlockLoading || selectedInternshipChapters.length === 0}
+                  disabled={unlockLoading}
                   className={`px-4 py-2 rounded text-white ${
-                    unlockLoading || selectedInternshipChapters.length === 0
+                    unlockLoading
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-emerald-600 hover:bg-emerald-700"
                   }`}
                 >
                   {unlockLoading
-                    ? "Unlocking..."
-                    : `Unlock ${selectedInternshipChapters.length} Chapter${
+                    ? "Saving..."
+                    : selectedInternshipChapters.length > 0
+                    ? `Unlock ${selectedInternshipChapters.length} Chapter${
                         selectedInternshipChapters.length !== 1 ? "s" : ""
-                      } for Internship`}
+                      } for Internship`
+                    : "Save Empty Unlock"}
                 </button>
               </div>
             </div>
