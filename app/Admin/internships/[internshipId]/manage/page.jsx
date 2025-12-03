@@ -10,6 +10,7 @@ import {
   doc as mcqDoc,
   updateDoc as mcqUpdateDoc,
   deleteDoc as mcqDeleteDoc,
+  addDoc as mcqAddDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 
@@ -73,8 +74,16 @@ export default function ManageInternshipCourses() {
     );
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     setCourses(list);
-    if (!activeCourseId && list.length > 0) setActiveCourseId(list[0].id);
-  }, [internshipId, activeCourseId]);
+    if (!activeCourseId && list.length > 0) {
+      // Prefer course id from URL if it exists in this internship
+      const fromUrl = initialCourseId && list.find((c) => c.id === initialCourseId);
+      if (fromUrl) {
+        setActiveCourseId(fromUrl.id);
+      } else {
+        setActiveCourseId(list[0].id);
+      }
+    }
+  }, [internshipId, activeCourseId, initialCourseId]);
 
   const fetchCourseAndChapters = useCallback(
     async function fetchCourseAndChapters(courseId) {
@@ -369,6 +378,41 @@ export default function ManageInternshipCourses() {
     }
   }
 
+  // Create a new progress test (assignment) for a given day and type (mcq|coding)
+  async function addProgressTestForDay(dayNumber, type) {
+    if (!course) return;
+    const baseCourseId = course.sourceCourseId || course.id;
+    if (!baseCourseId) return;
+    try {
+      const ref = mcqCollection(mcqDb, "courses", baseCourseId, "assignments");
+      await mcqAddDoc(ref, {
+        title:
+          type === "coding"
+            ? `Day ${dayNumber} Coding Test`
+            : `Day ${dayNumber} MCQ Test`,
+        dueDate: "",
+        day: Number(dayNumber) || 1,
+        type,
+        questions: [],
+      });
+      // Refresh list after adding
+      const snap = await mcqGetDocs(
+        mcqCollection(mcqDb, "courses", baseCourseId, "assignments")
+      );
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.day || 0) - (b.day || 0));
+      setProgressTests(list);
+      alert(
+        type === "coding"
+          ? `Coding progress test created for Day ${dayNumber}.`
+          : `MCQ progress test created for Day ${dayNumber}.`
+      );
+    } catch (e) {
+      console.error("Failed to add progress test:", e);
+      alert("Failed to add progress test.");
+    }
+  }
+
   // Save updated questions for the currently edited test
   async function saveTestQuestions() {
     if (!course || !questionEditTestId) return;
@@ -506,7 +550,13 @@ export default function ManageInternshipCourses() {
                 className={`border rounded-md px-3 py-2 flex items-center justify-between ${activeCourseId === c.id ? "bg-blue-50 border-blue-200" : ""}`}
               >
                 <button
-                  onClick={() => setActiveCourseId(c.id)}
+                  onClick={() => {
+                    setActiveCourseId(c.id);
+                    // Persist active course in the URL so refresh keeps the same state
+                    router.push(
+                      `/Admin/internships/${internshipId}/manage?course=${c.id}`
+                    );
+                  }}
                   className="text-left"
                 >
                   <div className="font-medium">{c.title || "Untitled"}</div>
@@ -795,10 +845,32 @@ export default function ManageInternshipCourses() {
                               Loading progress tests...
                             </p>
                           ) : dayTests.length === 0 ? (
-                            <p className="text-xs text-slate-500 italic">
-                              No progress tests mapped to this day.
-                              Create/edit them in Admin Tutorials.
-                            </p>
+                            <div className="space-y-2">
+                              <p className="text-xs text-slate-500 italic">
+                                No progress tests mapped to this day.
+                                You can add one here:
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    addProgressTestForDay(dayNumber, "mcq")
+                                  }
+                                  className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700"
+                                >
+                                  + Add MCQ Test
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    addProgressTestForDay(dayNumber, "coding")
+                                  }
+                                  className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs hover:bg-purple-700"
+                                >
+                                  + Add Coding Test
+                                </button>
+                              </div>
+                            </div>
                           ) : (
                             <div className="space-y-2">
                               {dayTests.map((test) => (

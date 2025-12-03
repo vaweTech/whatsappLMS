@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { auth, db } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, getDocs, setDoc, serverTimestamp, updateDoc, query, where, arrayUnion } from "firebase/firestore";
 import CheckTrainerAuth from "@/lib/CheckTrainerAuth";
 
 export default function TrainerHome() {
+  const router = useRouter();
   const [userId, setUserId] = useState("");
   const [classes, setClasses] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -763,23 +765,30 @@ export default function TrainerHome() {
         {allowedInternships.length > 0 && (
           <div className="bg-white border rounded p-4 mb-4">
             <h2 className="font-semibold mb-2">Your Internships</h2>
-            <ul className="space-y-1">
+            <div className="flex flex-wrap gap-2">
               {allowedInternships.map((id) => {
                 const it = internships.find((x) => x.id === id);
                 const selected = id === selectedInternshipId;
                 return (
-                  <li
+                  <button
                     key={id}
-                    className={`text-sm px-2 py-1 rounded cursor-pointer ${
-                      selected ? "bg-blue-50 border border-blue-300" : "hover:bg-gray-50 border border-transparent"
-                    }`}
-                    onClick={() => setSelectedInternshipId(id)}
+                    type="button"
+                    onClick={() =>
+                      setSelectedInternshipId((current) =>
+                        current === id ? "" : id
+                      )
+                    }
+                    className={`text-xs sm:text-sm px-3 py-1.5 rounded-md border transition-colors
+                      ${selected
+                        ? "bg-gray-300 border-gray-500 text-gray-900"
+                        : "bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200"
+                      }`}
                   >
-                    <span className="font-medium">{it?.name || id}</span>
-                  </li>
+                    {it?.name || id}
+                  </button>
                 );
               })}
-            </ul>
+            </div>
           </div>
         )}
         {selectedInternshipId && (
@@ -825,6 +834,13 @@ export default function TrainerHome() {
                         onClick={() => openInternshipAttendanceForCourse(cr)}
                       >
                         Take Attendance
+                      </button>
+                      <button
+                        className="text-sm bg-slate-600 hover:bg-slate-700 text-white px-3 py-1 rounded"
+                        onClick={() => router.push(`/internships/${selectedInternshipId}/courses/${cr.id}`)}
+                        title="Open the internship course view as students see it"
+                      >
+                        Open Course
                       </button>
                     </div>
                   </li>
