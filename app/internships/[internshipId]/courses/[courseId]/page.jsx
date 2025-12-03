@@ -51,6 +51,7 @@ export default function InternshipCoursePage() {
 
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [isTrainerUser, setIsTrainerUser] = useState(false);
 
   const [course, setCourse] = useState(null);
   const [chapters, setChapters] = useState([]);
@@ -63,8 +64,22 @@ export default function InternshipCoursePage() {
   const [accessibleChapters, setAccessibleChapters] = useState([]);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((u) => {
+    const unsub = auth.onAuthStateChanged(async (u) => {
       setUser(u);
+      if (u) {
+        try {
+          // Check role from users collection to see if this is a trainer/admin
+          const userSnap = await getDoc(doc(db, "users", u.uid));
+          const role = userSnap.exists() ? userSnap.data().role : undefined;
+          const trainerLike =
+            role === "trainer" || role === "admin" || role === "superadmin";
+          setIsTrainerUser(trainerLike);
+        } catch {
+          setIsTrainerUser(false);
+        }
+      } else {
+        setIsTrainerUser(false);
+      }
       setLoadingUser(false);
     });
     return () => unsub();
@@ -132,9 +147,39 @@ export default function InternshipCoursePage() {
   // Load which chapters are unlocked for this user (internship course access)
   useEffect(() => {
     async function loadAccess() {
-      if (!user || !courseId) return;
+      if (!user || !courseId || !internshipId) return;
+
       try {
-        // Try direct student document first
+        // Trainers/admins: mirror what students see by looking at the first internship student's chapterAccess
+        if (isTrainerUser) {
+          const internsSnap = await getDocs(
+            collection(db, "internships", internshipId, "students")
+          );
+          const firstWithId = internsSnap.docs
+            .map((d) => d.data())
+            .find(
+              (s) =>
+                typeof s.studentId === "string" && s.studentId.trim().length > 0
+            );
+
+          if (firstWithId) {
+            const sSnap = await getDoc(doc(db, "students", firstWithId.studentId));
+            if (sSnap.exists()) {
+              const data = sSnap.data() || {};
+              const chapterAccess = data.chapterAccess || {};
+              const unlocked = Array.isArray(chapterAccess[courseId])
+                ? chapterAccess[courseId]
+                : [];
+              setAccessibleChapters(unlocked);
+              return;
+            }
+          }
+          // Fallback: no student found → treat as all locked
+          setAccessibleChapters([]);
+          return;
+        }
+
+        // Students: use chapterAccess from their own student document
         let studentDoc = await getDoc(doc(db, "students", user.uid));
         if (!studentDoc.exists()) {
           const q = query(
@@ -162,7 +207,7 @@ export default function InternshipCoursePage() {
       }
     }
     loadAccess();
-  }, [user, courseId]);
+  }, [user, courseId, isTrainerUser, internshipId]);
 
   if (loadingUser || loading) {
     return (
@@ -236,7 +281,8 @@ export default function InternshipCoursePage() {
                 const dayTests = progressTests.filter(
                   (t) => typeof t.day === "number" && t.day === dayNumber
                 );
-              const hasAccess = accessibleChapters.includes(ch.id);
+                // Access is driven by unlocks / chapterAccess
+                const hasAccess = accessibleChapters.includes(ch.id);
 
                 return (
                 <div

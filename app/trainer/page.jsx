@@ -510,6 +510,19 @@ export default function TrainerHome() {
 
       if (selectedInternshipChapters.length > 0) {
         // Unlock specific chapters for internship, course and trainer
+        // First, remove any existing unlock docs for this trainer+internship+course+today
+        if (trainerKey) {
+          const existingQ = query(
+            collection(db, "unlocks"),
+            where("key", "==", trainerKey),
+            where("internshipId", "==", selectedInternshipId),
+            where("courseId", "==", selectedInternshipCourseForUnlock.id),
+            where("date", "==", ymd)
+          );
+          const existingSnap = await getDocs(existingQ);
+          await Promise.all(existingSnap.docs.map((d) => setDoc(d.ref, {}, { merge: false })));
+        }
+
         for (const chId of selectedInternshipChapters) {
           if (unlockInternshipStudents && internshipKey) {
             const ref = doc(db, "unlocks", `${internshipKey}|chapter:${chId}|${ymd}`);
@@ -531,30 +544,38 @@ export default function TrainerHome() {
             }, { merge: true });
           }
           if (trainerKey) {
-            const ref = doc(db, "unlocks", `${trainerKey}|internship:${selectedInternshipId}|course:${selectedInternshipCourseForUnlock.id}|chapter:${chId}|${ymd}`);
-            await setDoc(ref, { 
-              key: trainerKey, 
-              internshipId: selectedInternshipId,
-              courseId: selectedInternshipCourseForUnlock.id,
-              chapterId: chId, 
-              date: ymd, 
-              createdAt: serverTimestamp() 
-            }, { merge: true });
+            const ref = doc(
+              db,
+              "unlocks",
+              `${trainerKey}|internship:${selectedInternshipId}|course:${selectedInternshipCourseForUnlock.id}|chapter:${chId}|${ymd}`
+            );
+            await setDoc(
+              ref,
+              {
+                key: trainerKey,
+                internshipId: selectedInternshipId,
+                courseId: selectedInternshipCourseForUnlock.id,
+                chapterId: chId,
+                date: ymd,
+                createdAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
           }
         }
 
-        // Update student chapterAccess when unlocking chapters (persist unlock for students)
+        // Update student chapterAccess when unlocking chapters:
+        // overwrite with exactly the selected chapters (so unselected days become locked)
         if (studentIds.length > 0) {
           const updates = [];
           for (const sid of studentIds) {
             const sRef = doc(db, "students", sid);
-            for (const chId of selectedInternshipChapters) {
-              updates.push(
-                updateDoc(sRef, {
-                  [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]: arrayUnion(chId),
-                })
-              );
-            }
+            updates.push(
+              updateDoc(sRef, {
+                [`chapterAccess.${selectedInternshipCourseForUnlock.id}`]:
+                  selectedInternshipChapters,
+              })
+            );
           }
           if (updates.length > 0) {
             await Promise.all(updates);
